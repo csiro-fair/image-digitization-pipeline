@@ -341,7 +341,7 @@ class ImageRescuePipeline(BasePipeline):
                 # exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = time_str
 
             exif_bytes = piexif.dump(exif_dict)
-            img.save(dest_path, exif=exif_bytes)
+            img.save(dest_path, quality=100, exif=exif_bytes)
 
     # Function to interpolate geo-coordinates and timestamps
     def interpolate_points(

@@ -1,4 +1,5 @@
-from datetime import datetime
+from pathlib import Path
+from datetime import timedelta
 from pathlib import Path
 from shutil import copy2
 from typing import Any, Dict, List, Tuple
@@ -7,11 +8,10 @@ import numpy as np
 import pandas as pd
 import piexif
 from PIL import Image
-from PIL.ExifTags import TAGS
 from ifdo.models import ImageData
+
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
-from datetime import datetime, timedelta
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -56,43 +56,6 @@ class ImageRescuePipeline(BasePipeline):
                         f"Copied {source_file.resolve().absolute()} -> {data_dir}"
                     )
 
-    def get_image_output_file_name(
-        self, deployment_config: dict, file_path: Path, index: int
-    ) -> str:
-        try:
-            image = Image.open(file_path)
-
-            # Check if image has EXIF data
-            if hasattr(image, "_getexif"):
-                exif_data = image._getexif()
-                if exif_data is not None:
-                    # Loop through EXIF tags
-                    for tag, value in exif_data.items():
-                        tag_name = TAGS.get(tag, tag)
-                        if tag_name == "DateTime":
-                            date = datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
-                            # Convert to ISO 8601 format
-                            iso_timestamp = date.strftime("%Y%m%dT%H%M%SZ")
-
-                            # Construct and return new filename
-                            return (
-                                f'{self.config.get("platform_id")}_'
-                                f"SCP_"
-                                f'{self.config.get("voyage_id").split("_")[0]}_'
-                                f'{self.config.get("voyage_id").split("_")[1]}_'
-                                f'{deployment_config.get("deployment_id").split("_")[2]}_'
-                                f"{iso_timestamp}_"
-                                f"{index:04d}"
-                                f".JPG"
-                            )
-            else:
-                self.logger.error(f"No EXIF DateTime tag found in image {file_path}")
-
-        except IOError:
-            self.logger.error(
-                f"Error: Unable to open {file_path}. Are you sure it's an image?"
-            )
-
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Load CSV files into dataframes
         batch_data = "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv"
@@ -135,7 +98,7 @@ class ImageRescuePipeline(BasePipeline):
                     continue
 
                 folder_jpg_files = sorted(
-                    list(camera_roll_path.glob("*.jpg")), reverse=bool(not row["order"])
+                    list(camera_roll_path.glob("*.jpg")), reverse=bool(row["order"])
                 )
 
                 folder_jpg_files_with_rotation = [
@@ -151,13 +114,11 @@ class ImageRescuePipeline(BasePipeline):
 
             survey_id = group.iloc[0]["survey"]
             deployment_no = group.iloc[0]["deployment_no"]
-            output_directory = (
-                data_dir
-                / survey_id
-                / "PS1000"
-                / f"{survey_id}_{deployment_no}"
-                / "stills"
+            output_base_directory = (
+                data_dir / survey_id / "PS1000" / f"{survey_id}_{deployment_no}"
             )
+            output_stills_directory = output_base_directory / "stills"
+            output_thumbnails_directory = output_base_directory / "thumbnails"
 
             # Collect start and end coordinates and timestamps
             start_lat, start_long = (
@@ -189,7 +150,7 @@ class ImageRescuePipeline(BasePipeline):
             print(
                 survey_id,
                 deployment_no,
-                output_directory,
+                output_stills_directory,
                 start_lat,
                 start_long,
                 end_lat,
@@ -220,15 +181,15 @@ class ImageRescuePipeline(BasePipeline):
                 image_id = str(group_image_index).zfill(4)
 
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
-                output_filename = f'{self.config.get("platform_id")}_{survey_id}_{deployment_no}_{timestamp}_{image_id}.JPG'
+                output_filename = f'{self._config.get("platform_id")}_{survey_id}_{deployment_no}_{timestamp}_{image_id}.JPG'
 
                 input_file_path = camera_roll_path / jpg_file
-                output_file_path = output_directory / output_filename
+                output_file_path = output_stills_directory / output_filename
 
                 # print(input_file_path, output_file_path, row["rotation"], lat, long, time)
                 print(output_filename, rotation, lat, long, time)
                 if not output_file_path.exists():
-                    output_directory.mkdir(parents=True, exist_ok=True)
+                    output_stills_directory.mkdir(parents=True, exist_ok=True)
                     self.copy_and_rotate_image(
                         input_file_path,
                         output_file_path,
@@ -237,67 +198,31 @@ class ImageRescuePipeline(BasePipeline):
                         time_info=time,
                     )
                     group_image_index += 1
-            # exit()
+            else:
+                renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 
-            # TODO: Write out stats CSV - Candice
+                if renamed_stills_list:
+                    print("Generate thumbnails")
+                    print(output_thumbnails_directory)
+
+                    thumb_list = []
+                    output_thumbnails_directory.mkdir(exist_ok=True)
+
+                    for jpg in sorted(renamed_stills_list):
+                        output_filename = jpg.stem + "_THUMB" + jpg.suffix
+                        output_path = output_thumbnails_directory / output_filename
+                        self.logger.info(f"Generating thumbnail image: {output_path}")
+                        image.resize_fit(jpg, 300, 300, output_path)
+                        thumb_list.append(output_path)
+
+                    thumbnail_overview_path = output_base_directory / "overview.jpg"
+                    self.logger.info(
+                        f"Creating thumbnail overview image: {str(thumbnail_overview_path)}"
+                    )
+                    image.create_grid_image(thumb_list, thumbnail_overview_path)
+
+            # TODO: Write out stats CSV - Candice - now done in Marimba!
             # Directory structure... lat, longs
-
-        # jpg_list = []
-        #
-        # for file in data_dir.glob("**/*"):
-        #     if (
-        #         file.is_file()
-        #         and file.suffix.lower() in [".jpg"]
-        #         and "_THUMB" not in file.name
-        #         and "overview" not in file.name
-        #     ):
-        #         stills_path = data_dir / "stills"
-        #         stills_path.mkdir(exist_ok=True)
-        #
-        #         # Rename images
-        #         output_file_name = self.get_image_output_file_name(
-        #             config, str(file), int(str(file).split("_")[-1].split(".")[0])
-        #         )
-        #         output_file_path = stills_path / output_file_name
-        #         file.rename(output_file_path)
-        #         self.logger.info(f"Renamed file {file.name} -> {output_file_path}")
-        #
-        #         jpg_list.append(output_file_path)
-        #
-        #     if file.is_file() and file.suffix.lower() in [".mp4"]:
-        #         video_path = data_dir / "video"
-        #         video_path.mkdir(exist_ok=True)
-        #
-        #         # Move videos
-        #         output_file_path = video_path / file.name
-        #         file.rename(output_file_path)
-        #         self.logger.info(f"Renamed file {file.name} -> {output_file_path}")
-        #
-        #     if file.is_file() and file.suffix.lower() in [".csv"]:
-        #         data_path = data_dir / "data"
-        #         data_path.mkdir(exist_ok=True)
-        #
-        #         # Move data
-        #         output_file_path = data_path / file.name
-        #         file.rename(output_file_path)
-        #         self.logger.info(f"Renamed file {file.name} -> {output_file_path}")
-        #
-        # thumb_list = []
-        # thumbs_path = data_dir / "thumb"
-        # thumbs_path.mkdir(exist_ok=True)
-        #
-        # for jpg in jpg_list:
-        #     output_filename = jpg.stem + "_THUMB" + jpg.suffix
-        #     output_path = thumbs_path / output_filename
-        #     self.logger.info(f"Generating thumbnail image: {output_path}")
-        #     image.resize_fit(jpg, 300, 300, output_path)
-        #     thumb_list.append(output_path)
-        #
-        # thumbnail_overview_path = data_dir / "overview.jpg"
-        # self.logger.info(
-        #     f"Creating thumbnail overview image: {str(thumbnail_overview_path)}"
-        # )
-        # image.create_grid_image(thumb_list, data_dir / "overview.jpg")
 
     def _compose(
         self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict
@@ -394,6 +319,7 @@ class ImageRescuePipeline(BasePipeline):
 
             exif_dict = piexif.load(img.info.get("exif", b""))
 
+            # TODO: Remove from here because Marimba will do the EXIF burn in for GPS
             if gps_info:
                 latitude, longitude = gps_info
                 gps_ifd = {

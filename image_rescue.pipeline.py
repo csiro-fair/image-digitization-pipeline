@@ -211,15 +211,19 @@ class ImageRescuePipeline(BasePipeline):
                     for jpg in sorted(renamed_stills_list):
                         output_filename = jpg.stem + "_THUMB" + jpg.suffix
                         output_path = output_thumbnails_directory / output_filename
-                        self.logger.info(f"Generating thumbnail image: {output_path}")
-                        image.resize_fit(jpg, 300, 300, output_path)
-                        thumb_list.append(output_path)
+                        if not output_path.exists():
+                            self.logger.info(
+                                f"Generating thumbnail image: {output_path}"
+                            )
+                            image.resize_fit(jpg, 300, 300, output_path)
+                            thumb_list.append(output_path)
 
                     thumbnail_overview_path = output_base_directory / "overview.jpg"
-                    self.logger.info(
-                        f"Creating thumbnail overview image: {str(thumbnail_overview_path)}"
-                    )
-                    image.create_grid_image(thumb_list, thumbnail_overview_path)
+                    if not thumbnail_overview_path.exists():
+                        self.logger.info(
+                            f"Creating thumbnail overview image: {str(thumbnail_overview_path)}"
+                        )
+                        image.create_grid_image(thumb_list, thumbnail_overview_path)
 
             # TODO: Write out stats CSV - Candice - now done in Marimba!
             # Directory structure... lat, longs

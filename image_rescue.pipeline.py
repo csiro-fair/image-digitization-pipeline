@@ -197,7 +197,7 @@ class ImageRescuePipeline(BasePipeline):
                         gps_info=(lat, long),
                         time_info=time,
                     )
-                    group_image_index += 1
+                group_image_index += 1
             else:
                 renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 

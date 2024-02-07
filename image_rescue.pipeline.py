@@ -1,14 +1,27 @@
-from pathlib import Path
-from datetime import timedelta
+from datetime import timedelta, datetime
 from pathlib import Path
 from shutil import copy2
 from typing import Any, Dict, List, Tuple
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 import piexif
 from PIL import Image
-from ifdo.models import ImageData
+from ifdo.models import (
+    ImageData,
+    ImagePI,
+    ImageAcquisition,
+    ImageQuality,
+    ImageDeployment,
+    ImageNavigation,
+    ImageMarineZone,
+    ImageSpectralResolution,
+    ImagePixelMagnitude,
+    ImageIllumination,
+    ImageCaptureMode,
+    ImageFaunaAttraction,
+)
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
@@ -16,17 +29,21 @@ from marimba.lib import image
 
 class ImageRescuePipeline(BasePipeline):
     """
-    Test pipeline. No-op.
+    Marimba image rescue pipeline.
     """
 
     @staticmethod
     def get_pipeline_config_schema() -> dict:
-        return {}
+        return {
+            "platform_id": "PS1000",
+        }
 
     @staticmethod
     def get_collection_config_schema() -> dict:
         return {
             "batch_id": "1a",
+            "batch_data_path": "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv",
+            "inventory_data_path": "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/Film-Inventory_2023.xlsx",
         }
 
     def _import(
@@ -38,9 +55,7 @@ class ImageRescuePipeline(BasePipeline):
     ):
         self.logger.info(f"Importing data from {source_paths=} to {data_dir}")
 
-        base_path = Path(
-            "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/FilmRescue_batch1a/"
-        )
+        base_path = Path("/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/FilmRescue_batch1a/")
         for source_path in source_paths:
             if not source_path.is_dir():
                 continue
@@ -52,25 +67,16 @@ class ImageRescuePipeline(BasePipeline):
 
                     if not self.dry_run:
                         copy2(source_file, destination_path)
-                    self.logger.debug(
-                        f"Copied {source_file.resolve().absolute()} -> {data_dir}"
-                    )
+                    self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
-        # Load CSV files into dataframes
-        batch_data = "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv"
-        inventory = "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/Film-Inventory_2023.xlsx"
-
-        copy2(batch_data, data_dir)
-
-        # Read the copied Excel file
-        batch_data_df = pd.read_csv(data_dir / "0823_FilmRescue_batch1a.csv")
-        inventory_df = pd.read_excel(inventory, sheet_name="SEFHES")
+        # Copy CSV files to data directory and load into dataframes
+        copy2(config.get("batch_data_path"), data_dir)
+        batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
+        inventory_df = pd.read_excel(config.get("inventory_data_path"), sheet_name="SlideRescue_all")
 
         # Convert and save as CSV
-        inventory_df.to_csv(
-            (data_dir / Path(inventory).stem).with_suffix(".csv"), index=False
-        )
+        inventory_df.to_csv((data_dir / Path(config.get("inventory_data_path")).stem).with_suffix(".csv"), index=False)
 
         # Merge dataframes on common columns
         merged_df = pd.merge(inventory_df, batch_data_df, on="Survey_Stn")
@@ -97,14 +103,8 @@ class ImageRescuePipeline(BasePipeline):
                     print(f"Camera roll path does not exist: {camera_roll_path}")
                     continue
 
-                folder_jpg_files = sorted(
-                    list(camera_roll_path.glob("*.jpg")), reverse=bool(row["order"])
-                )
-
-                folder_jpg_files_with_rotation = [
-                    (item, row["rotation "]) for item in folder_jpg_files
-                ]
-
+                folder_jpg_files = sorted(list(camera_roll_path.glob("*.jpg")), reverse=bool(row["order"]))
+                folder_jpg_files_with_rotation = [(item, row["rotation "]) for item in folder_jpg_files]
                 group_jpg_files.extend(folder_jpg_files_with_rotation)
 
             n_points = len(group_jpg_files)
@@ -113,10 +113,9 @@ class ImageRescuePipeline(BasePipeline):
             print(n_points)
 
             survey_id = group.iloc[0]["survey"]
-            deployment_no = group.iloc[0]["deployment_no"]
-            output_base_directory = (
-                data_dir / survey_id / "PS1000" / f"{survey_id}_{deployment_no}"
-            )
+            deployment_number = group.iloc[0]["deployment_no"]
+            output_base_directory = data_dir / survey_id / self._config.get("platform_id") / f"{survey_id}_{deployment_number}"
+            output_data_directory = output_base_directory / "data"
             output_stills_directory = output_base_directory / "stills"
             output_thumbnails_directory = output_base_directory / "thumbnails"
 
@@ -149,7 +148,7 @@ class ImageRescuePipeline(BasePipeline):
 
             print(
                 survey_id,
-                deployment_no,
+                deployment_number,
                 output_stills_directory,
                 start_lat,
                 start_long,
@@ -158,8 +157,6 @@ class ImageRescuePipeline(BasePipeline):
                 start_time,
                 end_time,
             )
-
-            # TODO: Generate nav-file for the deployment
 
             # Interpolate geo-coordinates and timestamps
             interpolated_points = self.interpolate_points(
@@ -174,34 +171,95 @@ class ImageRescuePipeline(BasePipeline):
             print(interpolated_points)
             print(len(group_jpg_files), len(interpolated_points))
 
+            # Prepare navigation file for the deployment
+            column_mapping = {
+                "VideoLabInventory": "videolab_inventory",
+                "Proj": "project",
+                "Gear": "platform_deployment",
+                "Gear Component": "camera_name",
+                "Area_name": "area_name",
+                "transect_name": "transect_name",
+                "NOTE": "notes",
+            }
+            # TODO: change to approx_depth_range_in_metres
+            navigation_columns = [
+                "filename",
+                "platform_id",
+                "survey_id",
+                "deployment_number",
+                "timestamp",
+                "image_id",
+                "project",
+                "latitude",
+                "longitude",
+                "videolab_inventory",
+                "platform_deployment",
+                "camera_name",
+                "area_name",
+                "transect_name",
+                "approx_min_depth_in_metres",
+                "approx_max_depth_in_metres",
+                # "approx_depth_range_in_metres",
+                "notes",
+            ]
+            navigation_df = pd.DataFrame(columns=navigation_columns)
+
             # Process each JPG file
-            for (jpg_file, rotation), (lat, long, time) in zip(
-                group_jpg_files, interpolated_points
-            ):
+            for (jpg_file, rotation), (lat, long, time) in zip(group_jpg_files, interpolated_points):
                 image_id = str(group_image_index).zfill(4)
 
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
-                output_filename = f'{self._config.get("platform_id")}_{survey_id}_{deployment_no}_{timestamp}_{image_id}.JPG'
+                output_filename = f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
+
+                navigation_row = {
+                    "filename": output_filename,
+                    "platform_id": self._config.get("platform_id"),
+                    "survey_id": survey_id,
+                    "deployment_number": deployment_number,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S.%f"),
+                    "image_id": image_id,
+                    "latitude": lat,
+                    "longitude": long,
+                }
+                print(navigation_row)
+                # Add data from column_mapping
+                for col in column_mapping:
+                    mapped_col = column_mapping.get(col)
+                    if mapped_col and col in group.iloc[0]:
+                        navigation_row[mapped_col] = group.iloc[0][col]
+                else:
+                    depth = group.iloc[0]["Depth approx range (m)"]
+                    if depth:
+                        depth_split = depth.split("-")
+                        if len(depth_split) > 1:
+                            navigation_row["approx_min_depth_in_metres"] = min(depth_split)
+                            navigation_row["approx_max_depth_in_metres"] = max(depth_split)
+                        else:
+                            navigation_row["approx_min_depth_in_metres"] = depth
+                            navigation_row["approx_max_depth_in_metres"] = depth
+
+                print(navigation_row)
+                navigation_df = navigation_df.append(navigation_row, ignore_index=True)
 
                 input_file_path = camera_roll_path / jpg_file
                 output_file_path = output_stills_directory / output_filename
 
-                # print(input_file_path, output_file_path, row["rotation"], lat, long, time)
-                print(output_filename, rotation, lat, long, time)
+                print(output_filename, rotation)
                 if not output_file_path.exists():
                     output_stills_directory.mkdir(parents=True, exist_ok=True)
-                    self.copy_and_rotate_image(
-                        input_file_path,
-                        output_file_path,
-                        rotation,
-                        gps_info=(lat, long),
-                        time_info=time,
-                    )
+                    self.copy_and_rotate_image(input_file_path, output_file_path, rotation)
+                    self.logger.debug(f"Copied, sequenced, rotated and renamed {input_file_path.resolve().absolute()} -> {output_filename}")
                 group_image_index += 1
             else:
                 renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 
                 if renamed_stills_list:
+                    # Write out navigation data
+                    navigation_data_path = output_data_directory / f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}.CSV'
+                    output_data_directory.mkdir(parents=True, exist_ok=True)
+                    print(output_data_directory)
+                    navigation_df.to_csv(navigation_data_path, index=False)
+
                     print("Generate thumbnails")
                     print(output_thumbnails_directory)
 
@@ -212,92 +270,226 @@ class ImageRescuePipeline(BasePipeline):
                         output_filename = jpg.stem + "_THUMB" + jpg.suffix
                         output_path = output_thumbnails_directory / output_filename
                         if not output_path.exists():
-                            self.logger.info(
-                                f"Generating thumbnail image: {output_path}"
-                            )
+                            self.logger.info(f"Generating thumbnail image: {output_path}")
                             image.resize_fit(jpg, 300, 300, output_path)
                             thumb_list.append(output_path)
 
-                    thumbnail_overview_path = output_base_directory / "overview.jpg"
+                    # TODO: Finalise name of this file - ask Carlie...
+                    thumbnail_overview_path = output_base_directory / "PROOF_SHEET.JPG"
                     if not thumbnail_overview_path.exists():
-                        self.logger.info(
-                            f"Creating thumbnail overview image: {str(thumbnail_overview_path)}"
-                        )
+                        self.logger.info(f"Creating thumbnail overview image: {str(thumbnail_overview_path)}")
                         image.create_grid_image(thumb_list, thumbnail_overview_path)
 
             # TODO: Write out stats CSV - Candice - now done in Marimba!
             # Directory structure... lat, longs
 
-    def _compose(
-        self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict
-    ) -> Dict[Path, Tuple[Path, List[ImageData]]]:
+    def _compose(self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict) -> Dict[Path, Tuple[Path, List[ImageData]]]:
         data_mapping = {}
-        # for data_dir, config in zip(data_dirs, configs):
-        #     file_paths = []
-        #     file_paths.extend(data_dir.glob("**/*"))
-        #     base_output_path = Path(config.get("deployment_id"))
-        #
-        #     sensor_data_df = pd.read_csv(next((data_dir / "data").glob("*.CSV")))
-        #     sensor_data_df["FinalTime"] = pd.to_datetime(
-        #         sensor_data_df["FinalTime"], format="%Y-%m-%d %H:%M:%S.%f"
-        #     ).dt.floor("S")
-        #
-        #     for file_path in file_paths:
-        #         output_file_path = base_output_path / file_path.relative_to(data_dir)
-        #
-        #         if (
-        #             file_path.is_file()
-        #             and file_path.suffix.lower() in [".jpg"]
-        #             and "_THUMB" not in file_path.name
-        #             and "overview" not in file_path.name
-        #         ):
-        #             iso_timestamp = file_path.name.split("_")[5]
-        #             target_datetime = pd.to_datetime(
-        #                 iso_timestamp, format="%Y%m%dT%H%M%SZ"
-        #             )
-        #             matching_rows = sensor_data_df[
-        #                 sensor_data_df["FinalTime"] == target_datetime
-        #             ]
-        #
-        #             if not matching_rows.empty:
-        #                 # in iFDO, the image data list for an image is a list containing single ImageData
-        #                 image_data_list = [
-        #                     ImageData(
-        #                         image_datetime=datetime.strptime(
-        #                             iso_timestamp, "%Y%m%dT%H%M%SZ"
-        #                         ),
-        #                         image_latitude=matching_rows["UsblLatitude"].values[0],
-        #                         image_longitude=float(
-        #                             matching_rows["UsblLongitude"].values[0]
-        #                         ),
-        #                         image_depth=float(matching_rows["Altitude"].values[0]),
-        #                         image_altitude=float(
-        #                             matching_rows["Altitude"].values[0]
-        #                         ),
-        #                         image_event=str(matching_rows["Operation"].values[0]),
-        #                         image_platform=self.config.get("platform_id"),
-        #                         image_sensor=str(matching_rows["Camera"].values[0]),
-        #                         image_camera_pitch_degrees=float(
-        #                             matching_rows["Pitch"].values[0]
-        #                         ),
-        #                         image_camera_roll_degrees=float(
-        #                             matching_rows["Roll"].values[0]
-        #                         ),
-        #                         image_uuid=str(uuid4()),
-        #                         # image_pi=self.config.get("voyage_pi"),
-        #                         image_creators=[],
-        #                         image_license="MIT",
-        #                         image_copyright="",
-        #                         image_abstract=self.config.get("abstract"),
-        #                     )
-        #                 ]
-        #
-        #                 data_mapping[file_path] = output_file_path, image_data_list
-        #
-        #         elif file_path.is_file():
-        #             data_mapping[file_path] = output_file_path, None
+
+        for data_dir, config in zip(data_dirs, configs):
+            # List all files in the root directory recursively
+            all_files = data_dir.glob("**/*")
+            exclude_dir = data_dir / "stills"
+
+            # Filter out files from the exclude directory
+            ancillary_files = [f for f in all_files if exclude_dir not in f.parents]
+
+            # Add ancillary files to data mapping
+            for file_path in ancillary_files:
+                if file_path.is_file():
+                    output_file_path = file_path.relative_to(data_dir)
+                    data_mapping[file_path] = output_file_path, None
+
+            navigation_data_list = data_dir.glob("**/*.CSV")
+
+            for navigation_data in navigation_data_list:
+                navigation_data_df = pd.read_csv(navigation_data)
+                # navigation_data_df["timestamp"] = pd.to_datetime(navigation_data_df["timestamp"], format="%Y-%m-%d %H:%M:%S.%f").dt.floor("S")
+
+                # for file_path in file_paths:
+                for index, row in navigation_data_df.iterrows():
+                    file_path = navigation_data.parent.parent / "stills" / row["filename"]
+                    print(file_path)
+                    output_file_path = file_path.relative_to(data_dir)
+
+                    if (
+                        file_path.is_file()
+                        and file_path.suffix.lower() in [".jpg"]
+                        and "_THUMB" not in file_path.name
+                        and "overview" not in file_path.name
+                    ):
+                        # in iFDO, the image data list for an image is a list containing single ImageData
+
+                        # TODO: This information should live in the collection.yml config then this can roll through that list
+                        # Set the image creators
+                        image_creators = [
+                            ImagePI(name="Chris Jackett", orcid="0000-0003-1132-1558"),
+                            ImagePI(name="Franzis Althaus", orcid="0000-0002-5336-4612"),
+                            ImagePI(name="Candice Untiedt", orcid="0000-0003-1562-3473"),
+                            ImagePI(name="David Webb", orcid="0000-0000-0000-0000"),
+                            # ImagePI(name="Nic Bax", orcid="0000-0002-9697-4963"),
+                            ImagePI(name="CSIRO", orcid=""),
+                        ]
+
+                        # # TODO: Move to ifdo helper functions
+                        # # Get the image hash sha256
+                        # with open(file_path, "rb") as image_file:
+                        #     # Read the file's content
+                        #     image_data = image_file.read()
+                        #     # Create a hash object
+                        #     hash_sha256 = hashlib.sha256()
+                        #     # Update the hash object with the bytes from the image
+                        #     hash_sha256.update(image_data)
+                        #     # Get the hexadecimal representation of the hash
+                        #     image_hash_sha256 = hash_sha256.hexdigest()
+
+                        # image_entropy = image.get_shannon_entropy(file_path)
+                        # image_average_color = image.get_average_image_color(file_path)
+
+                        # # TODO: Change to approx_depth_in_metres
+                        # image_altitude = -(float(row["approx_min_depth_in_metres"]) + float(row["approx_max_depth_in_metres"])) / 2.0
+
+                        # "image_id",
+                        # "videolab_inventory",
+                        # "platform_deployment",
+                        # "area_name",
+                        # "transect_name",
+                        # "notes",
+
+                        # TODO: Override image-set-name
+                        # TODO: Don't sort iFDO in core Marimba
+
+                        image_data_list = [
+                            ImageData(
+                                # iFDO core (required)
+                                image_datetime=datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S.%f"),
+                                image_latitude=float(row["latitude"]),
+                                image_longitude=float(row["longitude"]),
+                                # Note: Leave image_altitude (singular number) empty
+                                image_altitude=None,
+                                image_coordinate_reference_system="EPSG:4326",
+                                image_coordinate_uncertainty_meters=None,
+                                # image_context: Optional[str] = None
+                                image_project=row["survey_id"],
+                                image_event=f'{row["survey_id"]}_{row["deployment_number"]}',
+                                image_platform=self.config.get("platform_id"),
+                                image_sensor=row["camera_name"],
+                                image_uuid=str(uuid4()),
+                                # image_hash_sha256=image_hash_sha256,
+                                # TODO: This is a bit tricky - Marimba will do the EXIF burn-in, but we would need to calculate and add the image_hash_sha256 afterwards
+                                # image_pi=row["survey_pi"],
+                                image_creators=image_creators,
+                                image_license="CC BY 4.0",
+                                image_copyright="CSIRO",
+                                # image_abstract=self.config.get("abstract"),
+                                #
+                                # # iFDO capture (optional)
+                                image_acquisition=ImageAcquisition.SLIDE,
+                                image_quality=ImageQuality.PRODUCT,
+                                image_deployment=ImageDeployment.SURVEY,
+                                image_navigation=ImageNavigation.RECONSTRUCTED,
+                                # TODO: Mention to Timm Schoening
+                                # TODO: Also ask about mapping to EXIF
+                                # image_scale_reference=ImageScaleReference.NONE,
+                                image_illumination=ImageIllumination.ARTIFICIAL_LIGHT,
+                                image_pixel_mag=ImagePixelMagnitude.CM,
+                                image_marine_zone=ImageMarineZone.SEAFLOOR,
+                                image_spectral_resolution=ImageSpectralResolution.RGB,
+                                image_capture_mode=ImageCaptureMode.TIMER,
+                                image_fauna_attraction=ImageFaunaAttraction.NONE,
+                                # image_area_square_meter: Optional[float] = None
+                                # image_meters_above_ground: Optional[float] = None
+                                # image_acquisition_settings: Optional[dict] = None
+                                # image_camera_yaw_degrees: Optional[float] = None
+                                # image_camera_pitch_degrees: Optional[float] = None
+                                # image_camera_roll_degrees: Optional[float] = None
+                                image_overlap_fraction=0,
+                                image_datetime_format="%Y-%m-%d %H:%M:%S.%f",
+                                # image_camera_pose: Optional[CameraPose] = None
+                                # image_camera_housing_viewport: Optional[CameraHousingViewport] = None
+                                # image_flatport_parameters: Optional[FlatportParameters] = None
+                                # image_domeport_parameters: Optional[DomeportParameters] = None
+                                # image_camera_calibration_model: Optional[CameraCalibrationModel] = None
+                                # image_photometric_calibration: Optional[PhotometricCalibration] = None
+                                # image_objective: Optional[str] = None
+                                image_target_environment="Benthic habitat",
+                                # image_target_timescale: Optional[str] = None
+                                # image_spatial_constraints: Optional[str] = None
+                                # image_temporal_constraints: Optional[str] = None
+                                # image_time_synchronization: Optional[str] = None
+                                image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
+                                image_curation_protocol="Processed with Marimba Image Rescue Pipeline"
+                                #
+                                # # iFDO content (optional)
+                                # image_entropy=image_entropy,
+                                # image_particle_count: Optional[int] = None
+                                # image_average_color=image_average_color,
+                                # image_mpeg7_colorlayout: Optional[List[float]] = None
+                                # image_mpeg7_colorstatistics: Optional[List[float]] = None
+                                # image_mpeg7_colorstructure: Optional[List[float]] = None
+                                # image_mpeg7_dominantcolor: Optional[List[float]] = None
+                                # image_mpeg7_edgehistogram: Optional[List[float]] = None
+                                # image_mpeg7_homogenoustexture: Optional[List[float]] = None
+                                # image_mpeg7_stablecolor: Optional[List[float]] = None
+                                # image_annotation_labels: Optional[List[ImageAnnotationLabel]] = None
+                                # image_annotation_creators: Optional[List[ImageAnnotationCreator]] = None
+                                # image_annotations: Optional[List[ImageAnnotation]] = None
+                            )
+                        ]
+
+                        data_mapping[file_path] = output_file_path, image_data_list
 
         return data_mapping
+
+    def open_image(self, image_path):
+        """
+        Opens an image from the specified path.
+        """
+        try:
+            img = Image.open(image_path)
+            return img
+        except IOError:
+            print("Error: Unable to load image.")
+            return None
+
+    def calculate_shannon_entropy(self, img):
+        """
+        Calculates the Shannon entropy of an image.
+        """
+        if img is None:
+            return None
+
+        # Convert to grayscale
+        gray_img = img.convert("L")
+
+        # Calculate the histogram
+        histogram = np.array(gray_img.histogram(), dtype=np.float32)
+
+        # Normalize the histogram to get probabilities
+        probabilities = histogram / histogram.sum()
+
+        # Filter out zero probabilities
+        probabilities = probabilities[probabilities > 0]
+
+        # Calculate Shannon entropy
+        entropy = -np.sum(probabilities * np.log2(probabilities))
+
+        return entropy
+
+    def calculate_average_image_color(self, img):
+        """
+        Calculates the average color for each channel of the image.
+        """
+        if img is None:
+            return None
+
+        # Convert the image to numpy array
+        np_img = np.array(img)
+
+        # Calculate the average color for each channel
+        average_color = np.mean(np_img, axis=(0, 1))
+
+        return list(map(int, average_color))
 
     def to_deg(self, value, loc):
         """Convert latitude and longitude to 3-element tuple in degrees as required by EXIF"""
@@ -313,9 +505,7 @@ class ImageRescuePipeline(BasePipeline):
         sec = int((abs_value - deg - min / 60) * 3600)
         return (deg, 1), (min, 1), (sec, 1), loc_value
 
-    def copy_and_rotate_image(
-        self, src_path, dest_path, rotation_flag, gps_info=None, time_info=None
-    ):
+    def copy_and_rotate_image(self, src_path, dest_path, rotation_flag):
         # Open the image with PIL
         with Image.open(src_path) as img:
             if rotation_flag == 1:
@@ -323,34 +513,30 @@ class ImageRescuePipeline(BasePipeline):
 
             exif_dict = piexif.load(img.info.get("exif", b""))
 
-            # TODO: Remove from here because Marimba will do the EXIF burn in for GPS
-            if gps_info:
-                latitude, longitude = gps_info
-                gps_ifd = {
-                    piexif.GPSIFD.GPSLatitudeRef: self.to_deg(latitude, ["N", "S"])[-1],
-                    piexif.GPSIFD.GPSLatitude: self.to_deg(latitude, ["N", "S"])[:-1],
-                    piexif.GPSIFD.GPSLongitudeRef: self.to_deg(longitude, ["E", "W"])[
-                        -1
-                    ],
-                    piexif.GPSIFD.GPSLongitude: self.to_deg(longitude, ["E", "W"])[:-1],
-                }
-                exif_dict["GPS"] = gps_ifd
+            # # TODO: Remove from here because Marimba will do the EXIF burn in for GPS
+            # if gps_info:
+            #     latitude, longitude = gps_info
+            #     gps_ifd = {
+            #         piexif.GPSIFD.GPSLatitudeRef: self.to_deg(latitude, ["N", "S"])[-1],
+            #         piexif.GPSIFD.GPSLatitude: self.to_deg(latitude, ["N", "S"])[:-1],
+            #         piexif.GPSIFD.GPSLongitudeRef: self.to_deg(longitude, ["E", "W"])[-1],
+            #         piexif.GPSIFD.GPSLongitude: self.to_deg(longitude, ["E", "W"])[:-1],
+            #     }
+            #     exif_dict["GPS"] = gps_ifd
 
-            # TODO: Add custom VARS-compatible timestamp metadata atom
-            if time_info:
-                time_str = time_info.strftime("%Y:%m:%d %H:%M:%S").encode()
-                exif_dict["0th"][piexif.ImageIFD.DateTime] = time_str
-                exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = time_str
-                # TODO: Think about DateTimeDigitized...
-                # exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = time_str
+            # # TODO: Add custom VARS-compatible timestamp metadata atom
+            # if time_info:
+            #     time_str = time_info.strftime("%Y:%m:%d %H:%M:%S").encode()
+            #     exif_dict["0th"][piexif.ImageIFD.DateTime] = time_str
+            #     exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = time_str
+            #     # TODO: Think about DateTimeDigitized...
+            #     # exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = time_str
 
             exif_bytes = piexif.dump(exif_dict)
             img.save(dest_path, quality=100, exif=exif_bytes)
 
     # Function to interpolate geo-coordinates and timestamps
-    def interpolate_points(
-        self, start_lat, start_long, end_lat, end_long, start_time, end_time, n_points
-    ):
+    def interpolate_points(self, start_lat, start_long, end_lat, end_long, start_time, end_time, n_points):
         lats, longs, times = [], [], []
 
         # Check for availability and data types before coordinate interpolation
@@ -359,12 +545,7 @@ class ImageRescuePipeline(BasePipeline):
             longs = np.linspace(float(start_long), float(end_long), n_points).tolist()
         else:
             # If unavailable, use start_lat and start_long for all points if they are valid
-            if (
-                pd.notna(start_lat)
-                and pd.notna(start_long)
-                and isinstance(start_lat, (int, float))
-                and isinstance(start_long, (int, float))
-            ):
+            if pd.notna(start_lat) and pd.notna(start_long) and isinstance(start_lat, (int, float)) and isinstance(start_long, (int, float)):
                 lats = [start_lat] * n_points
                 longs = [start_long] * n_points
 

@@ -21,6 +21,7 @@ from ifdo.models import (
     ImageIllumination,
     ImageCaptureMode,
     ImageFaunaAttraction,
+    CameraHousingViewport,
 )
 
 from marimba.core.pipeline import BasePipeline
@@ -44,6 +45,7 @@ class ImageRescuePipeline(BasePipeline):
             "batch_id": "1a",
             "batch_data_path": "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv",
             "inventory_data_path": "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/Film-Inventory_2023.xlsx",
+            "import_path": "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/FilmRescue_batch1a/",
         }
 
     def _import(
@@ -55,7 +57,7 @@ class ImageRescuePipeline(BasePipeline):
     ):
         self.logger.info(f"Importing data from {source_paths=} to {data_dir}")
 
-        base_path = Path("/datasets/work/oa-biaa-team/work/FAIR_for_imagery/WP8_DataRescue/FilmRescue/FilmRescue_batch1a/")
+        base_path = Path(config.get("import_path"))
         for source_path in source_paths:
             if not source_path.is_dir():
                 continue
@@ -180,8 +182,12 @@ class ImageRescuePipeline(BasePipeline):
                 "Area_name": "area_name",
                 "transect_name": "transect_name",
                 "NOTE": "notes",
+                "Survey_PI": "survey_pi",
+                "image-context": "image_context",
+                "Abstract": "abstract",
+                "View_Port": "view_port",
             }
-            # TODO: change to approx_depth_range_in_metres
+
             navigation_columns = [
                 "filename",
                 "platform_id",
@@ -197,10 +203,12 @@ class ImageRescuePipeline(BasePipeline):
                 "camera_name",
                 "area_name",
                 "transect_name",
-                "approx_min_depth_in_metres",
-                "approx_max_depth_in_metres",
-                # "approx_depth_range_in_metres",
+                "approx_depth_range_in_metres",
                 "notes",
+                "survey_pi",
+                "image_context",
+                "abstract",
+                "view_port",
             ]
             navigation_df = pd.DataFrame(columns=navigation_columns)
 
@@ -232,11 +240,9 @@ class ImageRescuePipeline(BasePipeline):
                     if depth:
                         depth_split = depth.split("-")
                         if len(depth_split) > 1:
-                            navigation_row["approx_min_depth_in_metres"] = min(depth_split)
-                            navigation_row["approx_max_depth_in_metres"] = max(depth_split)
+                            navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{min(depth_split)}"
                         else:
-                            navigation_row["approx_min_depth_in_metres"] = depth
-                            navigation_row["approx_max_depth_in_metres"] = depth
+                            navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
                 print(navigation_row)
                 navigation_df = navigation_df.append(navigation_row, ignore_index=True)
@@ -275,13 +281,10 @@ class ImageRescuePipeline(BasePipeline):
                             thumb_list.append(output_path)
 
                     # TODO: Finalise name of this file - ask Carlie...
-                    thumbnail_overview_path = output_base_directory / "PROOF_SHEET.JPG"
+                    thumbnail_overview_path = output_base_directory / "OVERVIEW.JPG"
                     if not thumbnail_overview_path.exists():
                         self.logger.info(f"Creating thumbnail overview image: {str(thumbnail_overview_path)}")
                         image.create_grid_image(thumb_list, thumbnail_overview_path)
-
-            # TODO: Write out stats CSV - Candice - now done in Marimba!
-            # Directory structure... lat, longs
 
     def _compose(self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict) -> Dict[Path, Tuple[Path, List[ImageData]]]:
         data_mapping = {}
@@ -309,7 +312,6 @@ class ImageRescuePipeline(BasePipeline):
                 # for file_path in file_paths:
                 for index, row in navigation_data_df.iterrows():
                     file_path = navigation_data.parent.parent / "stills" / row["filename"]
-                    print(file_path)
                     output_file_path = file_path.relative_to(data_dir)
 
                     if (
@@ -331,23 +333,17 @@ class ImageRescuePipeline(BasePipeline):
                             ImagePI(name="CSIRO", orcid=""),
                         ]
 
-                        # # TODO: Move to ifdo helper functions
-                        # # Get the image hash sha256
-                        # with open(file_path, "rb") as image_file:
-                        #     # Read the file's content
-                        #     image_data = image_file.read()
-                        #     # Create a hash object
-                        #     hash_sha256 = hashlib.sha256()
-                        #     # Update the hash object with the bytes from the image
-                        #     hash_sha256.update(image_data)
-                        #     # Get the hexadecimal representation of the hash
-                        #     image_hash_sha256 = hash_sha256.hexdigest()
-
                         # image_entropy = image.get_shannon_entropy(file_path)
                         # image_average_color = image.get_average_image_color(file_path)
 
-                        # # TODO: Change to approx_depth_in_metres
-                        # image_altitude = -(float(row["approx_min_depth_in_metres"]) + float(row["approx_max_depth_in_metres"])) / 2.0
+                        camera_housing_viewport = CameraHousingViewport(
+                            viewport_type=row["view_port"],
+                            viewport_optical_density=0.0,
+                            viewport_thickness_millimeter=0.0,
+                            viewport_extra_description=None,
+                        )
+
+                        image_pi = ImagePI(name=row["survey_pi"], orcid="")
 
                         # "image_id",
                         # "videolab_inventory",
@@ -355,9 +351,6 @@ class ImageRescuePipeline(BasePipeline):
                         # "area_name",
                         # "transect_name",
                         # "notes",
-
-                        # TODO: Override image-set-name
-                        # TODO: Don't sort iFDO in core Marimba
 
                         image_data_list = [
                             ImageData(
@@ -369,19 +362,19 @@ class ImageRescuePipeline(BasePipeline):
                                 image_altitude=None,
                                 image_coordinate_reference_system="EPSG:4326",
                                 image_coordinate_uncertainty_meters=None,
-                                # image_context: Optional[str] = None
+                                image_context=row["image_context"],
                                 image_project=row["survey_id"],
                                 image_event=f'{row["survey_id"]}_{row["deployment_number"]}',
                                 image_platform=self.config.get("platform_id"),
-                                image_sensor=row["camera_name"],
+                                image_sensor=row["camera_name"].strip(),
                                 image_uuid=str(uuid4()),
+                                # Note: Marimba automatically calculates and injects the SHA256 hash during packaging
                                 # image_hash_sha256=image_hash_sha256,
-                                # TODO: This is a bit tricky - Marimba will do the EXIF burn-in, but we would need to calculate and add the image_hash_sha256 afterwards
-                                # image_pi=row["survey_pi"],
+                                image_pi=image_pi,
                                 image_creators=image_creators,
                                 image_license="CC BY 4.0",
                                 image_copyright="CSIRO",
-                                # image_abstract=self.config.get("abstract"),
+                                image_abstract=row["abstract"],
                                 #
                                 # # iFDO capture (optional)
                                 image_acquisition=ImageAcquisition.SLIDE,
@@ -395,7 +388,7 @@ class ImageRescuePipeline(BasePipeline):
                                 image_pixel_mag=ImagePixelMagnitude.CM,
                                 image_marine_zone=ImageMarineZone.SEAFLOOR,
                                 image_spectral_resolution=ImageSpectralResolution.RGB,
-                                image_capture_mode=ImageCaptureMode.TIMER,
+                                image_capture_mode=ImageCaptureMode.MANUAL,
                                 image_fauna_attraction=ImageFaunaAttraction.NONE,
                                 # image_area_square_meter: Optional[float] = None
                                 # image_meters_above_ground: Optional[float] = None
@@ -406,7 +399,7 @@ class ImageRescuePipeline(BasePipeline):
                                 image_overlap_fraction=0,
                                 image_datetime_format="%Y-%m-%d %H:%M:%S.%f",
                                 # image_camera_pose: Optional[CameraPose] = None
-                                # image_camera_housing_viewport: Optional[CameraHousingViewport] = None
+                                image_camera_housing_viewport=camera_housing_viewport,
                                 # image_flatport_parameters: Optional[FlatportParameters] = None
                                 # image_domeport_parameters: Optional[DomeportParameters] = None
                                 # image_camera_calibration_model: Optional[CameraCalibrationModel] = None
@@ -418,7 +411,7 @@ class ImageRescuePipeline(BasePipeline):
                                 # image_temporal_constraints: Optional[str] = None
                                 # image_time_synchronization: Optional[str] = None
                                 image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
-                                image_curation_protocol="Processed with Marimba Image Rescue Pipeline"
+                                image_curation_protocol="Processed with Marimba v0.3"
                                 #
                                 # # iFDO content (optional)
                                 # image_entropy=image_entropy,
@@ -441,38 +434,20 @@ class ImageRescuePipeline(BasePipeline):
 
         return data_mapping
 
-    def copy_and_rotate_image(self, src_path, dest_path, rotation_flag):
+    @staticmethod
+    def copy_and_rotate_image(src_path, dest_path, rotation_flag):
         # Open the image with PIL
         with Image.open(src_path) as img:
             if rotation_flag == 1:
                 img = img.rotate(180)
 
             exif_dict = piexif.load(img.info.get("exif", b""))
-
-            # # TODO: Remove from here because Marimba will do the EXIF burn in for GPS
-            # if gps_info:
-            #     latitude, longitude = gps_info
-            #     gps_ifd = {
-            #         piexif.GPSIFD.GPSLatitudeRef: self.to_deg(latitude, ["N", "S"])[-1],
-            #         piexif.GPSIFD.GPSLatitude: self.to_deg(latitude, ["N", "S"])[:-1],
-            #         piexif.GPSIFD.GPSLongitudeRef: self.to_deg(longitude, ["E", "W"])[-1],
-            #         piexif.GPSIFD.GPSLongitude: self.to_deg(longitude, ["E", "W"])[:-1],
-            #     }
-            #     exif_dict["GPS"] = gps_ifd
-
-            # # TODO: Add custom VARS-compatible timestamp metadata atom
-            # if time_info:
-            #     time_str = time_info.strftime("%Y:%m:%d %H:%M:%S").encode()
-            #     exif_dict["0th"][piexif.ImageIFD.DateTime] = time_str
-            #     exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = time_str
-            #     # TODO: Think about DateTimeDigitized...
-            #     # exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = time_str
-
             exif_bytes = piexif.dump(exif_dict)
             img.save(dest_path, quality=100, exif=exif_bytes)
 
+    @staticmethod
     # Function to interpolate geo-coordinates and timestamps
-    def interpolate_points(self, start_lat, start_long, end_lat, end_long, start_time, end_time, n_points):
+    def interpolate_points(start_lat, start_long, end_lat, end_long, start_time, end_time, n_points):
         lats, longs, times = [], [], []
 
         # Check for availability and data types before coordinate interpolation

@@ -277,7 +277,7 @@ class ImageRescuePipeline(BasePipeline):
                         output_path = output_thumbnails_directory / output_filename
                         if not output_path.exists():
                             self.logger.info(f"Generating thumbnail image: {output_path}")
-                            image.resize_fit(jpg, 300, 300, output_path)
+                            image.resize_fit(jpg, 320, 240, output_path)
                             thumb_list.append(output_path)
 
                     # TODO: Finalise name of this file - ask Carlie...
@@ -320,8 +320,6 @@ class ImageRescuePipeline(BasePipeline):
                         and "_THUMB" not in file_path.name
                         and "overview" not in file_path.name
                     ):
-                        # in iFDO, the image data list for an image is a list containing single ImageData
-
                         # TODO: This information should live in the collection.yml config then this can roll through that list
                         # Set the image creators
                         image_creators = [
@@ -332,9 +330,6 @@ class ImageRescuePipeline(BasePipeline):
                             # ImagePI(name="Nic Bax", orcid="0000-0002-9697-4963"),
                             ImagePI(name="CSIRO", orcid=""),
                         ]
-
-                        # image_entropy = image.get_shannon_entropy(file_path)
-                        # image_average_color = image.get_average_image_color(file_path)
 
                         camera_housing_viewport = CameraHousingViewport(
                             viewport_type=row["view_port"],
@@ -411,12 +406,12 @@ class ImageRescuePipeline(BasePipeline):
                                 # image_temporal_constraints: Optional[str] = None
                                 # image_time_synchronization: Optional[str] = None
                                 image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
-                                image_curation_protocol="Processed with Marimba v0.3"
+                                image_curation_protocol="Processed with Marimba v0.3",
                                 #
                                 # # iFDO content (optional)
-                                # image_entropy=image_entropy,
+                                image_entropy=0.0,
                                 # image_particle_count: Optional[int] = None
-                                # image_average_color=image_average_color,
+                                image_average_color=[0, 0, 0],
                                 # image_mpeg7_colorlayout: Optional[List[float]] = None
                                 # image_mpeg7_colorstatistics: Optional[List[float]] = None
                                 # image_mpeg7_colorstructure: Optional[List[float]] = None

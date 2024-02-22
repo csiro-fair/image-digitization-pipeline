@@ -366,7 +366,7 @@ class ImageRescuePipeline(BasePipeline):
                                 image_project=row["survey_id"],
                                 image_event=f'{row["survey_id"]}_{row["deployment_number"]}',
                                 image_platform=self.config.get("platform_id"),
-                                image_sensor=row["camera_name"].strip(),
+                                image_sensor=str(row["camera_name"]).strip(),
                                 image_uuid=str(uuid4()),
                                 # Note: Marimba automatically calculates and injects the SHA256 hash during packaging
                                 # image_hash_sha256=image_hash_sha256,

@@ -1,3 +1,4 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
@@ -7,16 +8,34 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import piexif
-from ifdo.models import (CameraHousingViewport, ImageAcquisition,
-                         ImageCaptureMode, ImageData, ImageDeployment,
-                         ImageFaunaAttraction, ImageIllumination,
-                         ImageMarineZone, ImageNavigation, ImagePI,
-                         ImagePixelMagnitude, ImageQuality,
-                         ImageSpectralResolution)
+from ifdo.models import (
+    CameraHousingViewport,
+    ImageAcquisition,
+    ImageCaptureMode,
+    ImageData,
+    ImageDeployment,
+    ImageFaunaAttraction,
+    ImageIllumination,
+    ImageMarineZone,
+    ImageNavigation,
+    ImagePI,
+    ImagePixelMagnitude,
+    ImageQuality,
+    ImageSpectralResolution,
+)
 from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
+
+
+def copy_file(source_file: Path, destination_path: Path, dry_run: bool):
+    """
+    Function to copy a single file, to be used with multiprocessing.
+    """
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        copy2(source_file, destination_path)
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -52,14 +71,25 @@ class ImageRescuePipeline(BasePipeline):
         if not source_path.is_dir():
             return
 
-        for source_file in source_path.glob("**/*"):
-            if source_file.is_file() and source_file.suffix.lower() == ".jpg":
-                destination_path = data_dir / source_file.relative_to(base_path)
-                destination_path.parent.mkdir(parents=True, exist_ok=True)
+        files_to_copy = sorted(
+            [
+                source_file
+                for source_file in source_path.glob("**/*")
+                if source_file.is_file() and source_file.suffix.lower() == ".jpg"
+            ]
+        )
 
-                if not self.dry_run:
-                    copy2(source_file, destination_path)
-                self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
+        with ProcessPoolExecutor() as executor:
+            futures = []
+            for source_file in files_to_copy:
+                destination_path = data_dir / source_file.relative_to(base_path)
+                futures.append(executor.submit(copy_file, source_file, destination_path, self.dry_run))
+
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    self.logger.error(f"Error copying file: {e}")
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes
@@ -106,7 +136,9 @@ class ImageRescuePipeline(BasePipeline):
 
             survey_id = group.iloc[0]["survey"]
             deployment_number = group.iloc[0]["deployment_no"]
-            output_base_directory = data_dir / survey_id / self._config.get("platform_id") / f"{survey_id}_{deployment_number}"
+            output_base_directory = (
+                data_dir / survey_id / self._config.get("platform_id") / f"{survey_id}_{deployment_number}"
+            )
             output_data_directory = output_base_directory / "data"
             output_stills_directory = output_base_directory / "stills"
             output_thumbnails_directory = output_base_directory / "thumbnails"
@@ -207,7 +239,9 @@ class ImageRescuePipeline(BasePipeline):
                 image_id = str(group_image_index).zfill(4)
 
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
-                output_filename = f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
+                output_filename = (
+                    f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
+                )
 
                 navigation_row = {
                     "filename": output_filename,
@@ -244,14 +278,18 @@ class ImageRescuePipeline(BasePipeline):
                 if not output_file_path.exists():
                     output_stills_directory.mkdir(parents=True, exist_ok=True)
                     self.copy_and_rotate_image(input_file_path, output_file_path, rotation)
-                    self.logger.debug(f"Copied, sequenced, rotated and renamed {input_file_path.resolve().absolute()} -> {output_filename}")
+                    self.logger.debug(
+                        f"Copied, sequenced, rotated and renamed {input_file_path.resolve().absolute()} -> {output_filename}"
+                    )
                 group_image_index += 1
             else:
                 renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 
                 if renamed_stills_list:
                     # Write out navigation data
-                    navigation_data_path = output_data_directory / f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}.CSV'
+                    navigation_data_path = (
+                        output_data_directory / f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}.CSV'
+                    )
                     output_data_directory.mkdir(parents=True, exist_ok=True)
                     print(output_data_directory)
                     navigation_df.to_csv(navigation_data_path, index=False)
@@ -276,7 +314,9 @@ class ImageRescuePipeline(BasePipeline):
                         self.logger.info(f"Creating thumbnail overview image: {str(thumbnail_overview_path)}")
                         image.create_grid_image(thumb_list, thumbnail_overview_path)
 
-    def _compose(self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict) -> Dict[Path, Tuple[Path, List[ImageData]]]:
+    def _compose(
+        self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict
+    ) -> Dict[Path, Tuple[Path, List[ImageData]]]:
         data_mapping = {}
 
         for data_dir, config in zip(data_dirs, configs):
@@ -441,7 +481,12 @@ class ImageRescuePipeline(BasePipeline):
             longs = np.linspace(float(start_long), float(end_long), n_points).tolist()
         else:
             # If unavailable, use start_lat and start_long for all points if they are valid
-            if pd.notna(start_lat) and pd.notna(start_long) and isinstance(start_lat, (int, float)) and isinstance(start_long, (int, float)):
+            if (
+                pd.notna(start_lat)
+                and pd.notna(start_long)
+                and isinstance(start_lat, (int, float))
+                and isinstance(start_long, (int, float))
+            ):
                 lats = [start_lat] * n_points
                 longs = [start_long] * n_points
 

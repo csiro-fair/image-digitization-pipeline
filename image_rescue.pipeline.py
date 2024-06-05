@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
 from typing import Any, Dict, List, Tuple
@@ -7,22 +7,13 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import piexif
+from ifdo.models import (CameraHousingViewport, ImageAcquisition,
+                         ImageCaptureMode, ImageData, ImageDeployment,
+                         ImageFaunaAttraction, ImageIllumination,
+                         ImageMarineZone, ImageNavigation, ImagePI,
+                         ImagePixelMagnitude, ImageQuality,
+                         ImageSpectralResolution)
 from PIL import Image
-from ifdo.models import (
-    ImageData,
-    ImagePI,
-    ImageAcquisition,
-    ImageQuality,
-    ImageDeployment,
-    ImageNavigation,
-    ImageMarineZone,
-    ImageSpectralResolution,
-    ImagePixelMagnitude,
-    ImageIllumination,
-    ImageCaptureMode,
-    ImageFaunaAttraction,
-    CameraHousingViewport,
-)
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
@@ -51,25 +42,24 @@ class ImageRescuePipeline(BasePipeline):
     def _import(
         self,
         data_dir: Path,
-        source_paths: List[Path],
+        source_path: Path,
         config: Dict[str, Any],
         **kwargs: dict,
     ):
-        self.logger.info(f"Importing data from {source_paths=} to {data_dir}")
+        self.logger.info(f"Importing data from {source_path=} to {data_dir}")
 
         base_path = Path(config.get("import_path"))
-        for source_path in source_paths:
-            if not source_path.is_dir():
-                continue
+        if not source_path.is_dir():
+            return
 
-            for source_file in source_path.glob("**/*"):
-                if source_file.is_file() and source_file.suffix.lower() == ".jpg":
-                    destination_path = data_dir / source_file.relative_to(base_path)
-                    destination_path.parent.mkdir(parents=True, exist_ok=True)
+        for source_file in source_path.glob("**/*"):
+            if source_file.is_file() and source_file.suffix.lower() == ".jpg":
+                destination_path = data_dir / source_file.relative_to(base_path)
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    if not self.dry_run:
-                        copy2(source_file, destination_path)
-                    self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
+                if not self.dry_run:
+                    copy2(source_file, destination_path)
+                self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes

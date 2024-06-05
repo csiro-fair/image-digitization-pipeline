@@ -1,4 +1,4 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
@@ -27,15 +27,6 @@ from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
-
-
-def copy_file(source_file: Path, destination_path: Path, dry_run: bool):
-    """
-    Function to copy a single file, to be used with multiprocessing.
-    """
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    if not dry_run:
-        copy2(source_file, destination_path)
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -79,17 +70,26 @@ class ImageRescuePipeline(BasePipeline):
             ]
         )
 
-        with ProcessPoolExecutor() as executor:
-            futures = []
-            for source_file in files_to_copy:
+        def copy_file(source_file: Path):
+            try:
                 destination_path = data_dir / source_file.relative_to(base_path)
-                futures.append(executor.submit(copy_file, source_file, destination_path, self.dry_run))
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if not self.dry_run:
+                    copy2(source_file, destination_path)
+                self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
+            except Exception as e:
+                self.logger.error(f"Failed to copy {source_file.resolve().absolute()}: {e}")
+
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(copy_file, source_file): source_file for source_file in files_to_copy}
 
             for future in as_completed(futures):
+                source_file = futures[future]
                 try:
                     future.result()
                 except Exception as e:
-                    self.logger.error(f"Error copying file: {e}")
+                    self.logger.error(f"Error copying {source_file}: {e}")
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes

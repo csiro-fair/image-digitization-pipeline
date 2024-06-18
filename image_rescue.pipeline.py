@@ -72,20 +72,33 @@ class ImageRescuePipeline(BasePipeline):
 
         files_to_copy = [source_file for source_file in source_path.glob("**/*.jpg") if source_file.is_file()]
 
-        @multithreaded()
-        def copy_files(self, item: Path, thread_num: int, data_dir: Path, base_path: Path) -> None:
+        for file in files_to_copy:
+
             try:
-                destination_path = data_dir / item.relative_to(base_path)
+                destination_path = data_dir / file.relative_to(base_path)
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
 
                 if not self.dry_run:
-                    copy2(item, destination_path)
-                self.logger.debug(f"Copied {item.resolve().absolute()} -> {destination_path}")
+                    copy2(file, destination_path)
+                self.logger.debug(f"Copied {file.resolve().absolute()} -> {destination_path}")
             except Exception as e:
-                self.logger.error(f"Failed to copy {item.resolve().absolute()}: {e}")
+                self.logger.error(f"Failed to copy {file.resolve().absolute()}: {e}")
 
-        # Call the decorated function
-        copy_files(self, data_dir=data_dir, base_path=base_path, items=files_to_copy)
+
+        # @multithreaded()
+        # def copy_files(self, item: Path, thread_num: int, data_dir: Path, base_path: Path) -> None:
+        #     try:
+        #         destination_path = data_dir / item.relative_to(base_path)
+        #         destination_path.parent.mkdir(parents=True, exist_ok=True)
+        #
+        #         if not self.dry_run:
+        #             copy2(item, destination_path)
+        #         self.logger.debug(f"Copied {item.resolve().absolute()} -> {destination_path}")
+        #     except Exception as e:
+        #         self.logger.error(f"Failed to copy {item.resolve().absolute()}: {e}")
+        #
+        # # Call the decorated function
+        # copy_files(self, data_dir=data_dir, base_path=base_path, items=files_to_copy)
 
     def _process(
         self,

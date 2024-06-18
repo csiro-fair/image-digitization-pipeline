@@ -72,8 +72,8 @@ class ImageRescuePipeline(BasePipeline):
 
         files_to_copy = [source_file for source_file in source_path.glob("**/*.jpg") if source_file.is_file()]
 
-        @multithreaded(logger=self.logger)
-        def copy_files(item: Path, data_dir: Path, base_path: Path) -> None:
+        @multithreaded()
+        def copy_files(self, item: Path, thread_num: int, data_dir: Path, base_path: Path) -> None:
             try:
                 destination_path = data_dir / item.relative_to(base_path)
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +85,7 @@ class ImageRescuePipeline(BasePipeline):
                 self.logger.error(f"Failed to copy {item.resolve().absolute()}: {e}")
 
         # Call the decorated function
-        copy_files(data_dir=data_dir, base_path=base_path, items=files_to_copy)
+        copy_files(self, data_dir=data_dir, base_path=base_path, items=files_to_copy)
 
     def _process(
         self,

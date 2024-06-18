@@ -27,6 +27,7 @@ from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
+from marimba.lib.decorators import multithreaded
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -55,41 +56,35 @@ class ImageRescuePipeline(BasePipeline):
         source_path: Path,
         config: Dict[str, Any],
         **kwargs: dict,
-    ):
-        self.logger.info(f"Importing data from {source_path=} to {data_dir}")
+    ) -> None:
+        self.logger.info(f"Importing data from {source_path} to {data_dir}")
 
-        base_path = Path(config.get("import_path"))
-        if not source_path.is_dir():
+        import_path = config.get("import_path")
+        if import_path is None:
+            self.logger.error("Config missing 'import_path'")
             return
 
-        files_to_copy = sorted(
-            [
-                source_file
-                for source_file in source_path.glob("**/*")
-                if source_file.is_file() and source_file.suffix.lower() == ".jpg"
-            ]
-        )
+        base_path = Path(import_path)
+        if not source_path.is_dir():
+            self.logger.error(f"Source path {source_path} is not a directory")
+            return
 
-        def copy_file(source_file: Path):
+        files_to_copy = [source_file for source_file in source_path.glob("**/*.jpg") if source_file.is_file()]
+
+        @multithreaded(logger=self.logger)
+        def copy_files(item: Path, data_dir: Path, base_path: Path) -> None:
             try:
-                destination_path = data_dir / source_file.relative_to(base_path)
+                destination_path = data_dir / item.relative_to(base_path)
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
 
                 if not self.dry_run:
-                    copy2(source_file, destination_path)
-                self.logger.debug(f"Copied {source_file.resolve().absolute()} -> {data_dir}")
+                    copy2(item, destination_path)
+                self.logger.debug(f"Copied {item.resolve().absolute()} -> {destination_path}")
             except Exception as e:
-                self.logger.error(f"Failed to copy {source_file.resolve().absolute()}: {e}")
+                self.logger.error(f"Failed to copy {item.resolve().absolute()}: {e}")
 
-        with ThreadPoolExecutor() as executor:
-            futures = {executor.submit(copy_file, source_file): source_file for source_file in files_to_copy}
-
-            for future in as_completed(futures):
-                source_file = futures[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    self.logger.error(f"Error copying {source_file}: {e}")
+        # Call the decorated function
+        copy_files(data_dir=data_dir, base_path=base_path, items=files_to_copy)
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes
@@ -314,7 +309,7 @@ class ImageRescuePipeline(BasePipeline):
                         self.logger.info(f"Creating thumbnail overview image: {str(thumbnail_overview_path)}")
                         image.create_grid_image(thumb_list, thumbnail_overview_path)
 
-    def _compose(
+    def _package(
         self, data_dirs: List[Path], configs: List[Dict[str, Any]], **kwargs: dict
     ) -> Dict[Path, Tuple[Path, List[ImageData]]]:
         data_mapping = {}

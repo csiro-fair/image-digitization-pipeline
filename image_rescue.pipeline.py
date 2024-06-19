@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
@@ -8,6 +8,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import piexif
+from PIL import Image
 from ifdo.models import (
     CameraHousingViewport,
     ImageAcquisition,
@@ -23,12 +24,11 @@ from ifdo.models import (
     ImageQuality,
     ImageSpectralResolution,
 )
-from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
 from marimba.lib import image
-from marimba.lib.decorators import multithreaded
 from marimba.lib.parallel import multithreaded_generate_thumbnails
+from marimba.marimba import __version__
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -84,28 +84,7 @@ class ImageRescuePipeline(BasePipeline):
             except Exception as e:
                 self.logger.error(f"Failed to copy {file.resolve().absolute()}: {e}")
 
-
-        # @multithreaded()
-        # def copy_files(self, item: Path, thread_num: int, data_dir: Path, base_path: Path) -> None:
-        #     try:
-        #         destination_path = data_dir / item.relative_to(base_path)
-        #         destination_path.parent.mkdir(parents=True, exist_ok=True)
-        #
-        #         if not self.dry_run:
-        #             copy2(item, destination_path)
-        #         self.logger.debug(f"Copied {item.resolve().absolute()} -> {destination_path}")
-        #     except Exception as e:
-        #         self.logger.error(f"Failed to copy {item.resolve().absolute()}: {e}")
-        #
-        # # Call the decorated function
-        # copy_files(self, data_dir=data_dir, base_path=base_path, items=files_to_copy)
-
-    def _process(
-        self,
-        data_dir: Path,
-        config: Dict[str, Any],
-        **kwargs: dict,
-    ):
+    def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes
         copy2(config.get("batch_data_path"), data_dir)
         batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
@@ -119,6 +98,9 @@ class ImageRescuePipeline(BasePipeline):
 
         # Group the DataFrame by 'Survey_Stn' column
         grouped = merged_df.groupby("Survey_Stn")
+
+        # Set to track folders that have images moved out of them
+        processed_folders = set()
 
         # Loop through each group
         for name, group in grouped:
@@ -142,6 +124,10 @@ class ImageRescuePipeline(BasePipeline):
                 folder_jpg_files = sorted(list(camera_roll_path.glob("*.jpg")), reverse=bool(row["order"]))
                 folder_jpg_files_with_rotation = [(item, row["rotation "]) for item in folder_jpg_files]
                 group_jpg_files.extend(folder_jpg_files_with_rotation)
+
+                # Track processed folders
+                if folder_jpg_files:
+                    processed_folders.add(camera_roll_path)
 
             n_points = len(group_jpg_files)
 
@@ -278,6 +264,7 @@ class ImageRescuePipeline(BasePipeline):
                     if depth:
                         depth_split = depth.split("-")
                         if len(depth_split) > 1:
+                            # TODO: Double check with Franzis that this is correct
                             navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{min(depth_split)}"
                         else:
                             navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
@@ -291,7 +278,8 @@ class ImageRescuePipeline(BasePipeline):
                 print(output_filename, rotation)
                 if not output_file_path.exists():
                     output_stills_directory.mkdir(parents=True, exist_ok=True)
-                    self.copy_and_rotate_image(input_file_path, output_file_path, rotation)
+                    # self.copy_and_rotate_image(input_file_path, output_file_path, rotation)
+                    self.move_and_rotate_image(input_file_path, output_file_path, rotation)
                     self.logger.debug(
                         f"Copied, sequenced, rotated and renamed {input_file_path.resolve().absolute()} -> {output_filename}"
                     )
@@ -321,6 +309,12 @@ class ImageRescuePipeline(BasePipeline):
                     # Create an overview image from the generated thumbnails
                     thumbnail_overview_path = output_base_directory / "OVERVIEW.JPG"
                     image.create_grid_image(thumbnail_list, thumbnail_overview_path)
+
+        # Check and delete empty folders
+        for folder in processed_folders:
+            if not any(folder.iterdir()):
+                folder.rmdir()
+                print(f"Deleted empty folder: {folder}")
 
     def _package(
         self,
@@ -360,7 +354,6 @@ class ImageRescuePipeline(BasePipeline):
                     and "_THUMB" not in file_path.name
                     and "overview" not in file_path.name
                 ):
-                    # TODO: This information should live in the collection.yml config then this can roll through that list
                     # Set the image creators
                     image_creators = [
                         ImagePI(name="Chris Jackett", orcid="0000-0003-1132-1558"),
@@ -368,7 +361,6 @@ class ImageRescuePipeline(BasePipeline):
                         ImagePI(name="Candice Untiedt", orcid="0000-0003-1562-3473"),
                         ImagePI(name="David Webb", orcid="0000-0000-0000-0000"),
                         # ImagePI(name="Nic Bax", orcid="0000-0002-9697-4963"),
-                        ImagePI(name="CSIRO", orcid=""),
                     ]
 
                     camera_housing_viewport = CameraHousingViewport(
@@ -416,8 +408,6 @@ class ImageRescuePipeline(BasePipeline):
                             image_quality=ImageQuality.PRODUCT,
                             image_deployment=ImageDeployment.SURVEY,
                             image_navigation=ImageNavigation.RECONSTRUCTED,
-                            # TODO: Mention to Timm Schoening
-                            # TODO: Also ask about mapping to EXIF
                             # image_scale_reference=ImageScaleReference.NONE,
                             image_illumination=ImageIllumination.ARTIFICIAL_LIGHT,
                             image_pixel_mag=ImagePixelMagnitude.CM,
@@ -446,12 +436,12 @@ class ImageRescuePipeline(BasePipeline):
                             # image_temporal_constraints: Optional[str] = None
                             # image_time_synchronization: Optional[str] = None
                             image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
-                            image_curation_protocol="Processed with Marimba v0.3",
+                            image_curation_protocol=f"Processed with Marimba v{__version__}",
                             #
                             # # iFDO content (optional)
-                            image_entropy=0.0,
+                            # image_entropy=0.0,
                             # image_particle_count: Optional[int] = None
-                            image_average_color=[0, 0, 0],
+                            # image_average_color=[0, 0, 0],
                             # image_mpeg7_colorlayout: Optional[List[float]] = None
                             # image_mpeg7_colorstatistics: Optional[List[float]] = None
                             # image_mpeg7_colorstructure: Optional[List[float]] = None
@@ -479,6 +469,29 @@ class ImageRescuePipeline(BasePipeline):
             exif_dict = piexif.load(img.info.get("exif", b""))
             exif_bytes = piexif.dump(exif_dict)
             img.save(dest_path, quality=100, exif=exif_bytes)
+
+    @staticmethod
+    def move_and_rotate_image(src_path, dest_path, rotation_flag):
+        """
+        Move and rotate an image.
+
+        Args:
+        - src_path (str): Source path of the image to be moved and rotated.
+        - dest_path (str): Destination path to save the rotated image.
+        - rotation_flag (int): Flag to indicate whether to rotate the image.
+                               If 1, rotate the image by 180 degrees.
+        """
+        # Open the image with PIL
+        with Image.open(src_path) as img:
+            if rotation_flag == 1:
+                img = img.rotate(180)
+
+            exif_dict = piexif.load(img.info.get("exif", b""))
+            exif_bytes = piexif.dump(exif_dict)
+            img.save(dest_path, quality=100, exif=exif_bytes)
+
+        # Delete the original image
+        os.remove(src_path)
 
     @staticmethod
     # Function to interpolate geo-coordinates and timestamps

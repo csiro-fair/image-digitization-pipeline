@@ -106,9 +106,8 @@ class ImageRescuePipeline(BasePipeline):
         # Loop through each group
         for name, group in grouped:
             group_image_index = 1
-
             sorted_group = group.sort_values(by="sequence")
-            print(sorted_group)
+            self.logger.debug(f"Processing group: {name}")
 
             # List to store all found jpg files
             group_jpg_files = []
@@ -119,7 +118,7 @@ class ImageRescuePipeline(BasePipeline):
 
                 # Skip if the directory does not exist
                 if not camera_roll_path.exists():
-                    print(f"Camera roll path does not exist: {camera_roll_path}")
+                    self.logger.debug(f"Camera roll path does not exist: {camera_roll_path}")
                     continue
 
                 folder_jpg_files = sorted(list(camera_roll_path.glob("*.jpg")), reverse=bool(row["order"]))
@@ -132,9 +131,6 @@ class ImageRescuePipeline(BasePipeline):
 
             n_points = len(group_jpg_files)
 
-            print(group_jpg_files)
-            print(n_points)
-
             survey_id = group.iloc[0]["survey"]
             deployment_number = group.iloc[0]["deployment_no"]
             platform_id = group.iloc[0]["Platform_abbreviation "]
@@ -144,17 +140,13 @@ class ImageRescuePipeline(BasePipeline):
             output_thumbnails_directory = output_base_directory / "thumbnails"
 
             # Collect start and end coordinates and timestamps
-            start_lat, start_long = (
-                group.iloc[0]["start_lat"],
-                group.iloc[0]["start_long"],
-            )
+            start_lat, start_long = group.iloc[0]["start_lat"], group.iloc[0]["start_long"]
             end_lat, end_long = group.iloc[0]["end_lat"], group.iloc[0]["end_long"]
             start_time, end_time, utc_offset = (
                 group.iloc[0]["Starte date/time"],
                 group.iloc[0]["End Date/time"],
                 group.iloc[0]["UTC offset"],
             )
-            print(start_time, end_time)
 
             if not utc_offset:
                 utc_offset = 10
@@ -162,38 +154,21 @@ class ImageRescuePipeline(BasePipeline):
             # Create a timedelta object for the offset
             offset = timedelta(hours=utc_offset)
 
+            # Adjust timestamps for the UTC offset
             if start_time:
-                # Adjust the timestamp for the UTC offset
                 start_time = start_time + offset
-
             if end_time:
-                # Adjust the timestamp for the UTC offset
                 end_time = end_time + offset
 
-            print(
-                survey_id,
-                deployment_number,
-                output_stills_directory,
-                start_lat,
-                start_long,
-                end_lat,
-                end_long,
-                start_time,
-                end_time,
+            self.logger.debug(
+                f"Survey ID: {survey_id}, Deployment: {deployment_number}, Stills Dir: {output_stills_directory}, "
+                f"Start: ({start_lat}, {start_long}), End: ({end_lat}, {end_long}), Time: ({start_time}, {end_time})"
             )
 
             # Interpolate geo-coordinates and timestamps
             interpolated_points = self.interpolate_points(
-                start_lat,
-                start_long,
-                end_lat,
-                end_long,
-                start_time,
-                end_time,
-                n_points,
+                start_lat, start_long, end_lat, end_long, start_time, end_time, n_points
             )
-            print(interpolated_points)
-            print(len(group_jpg_files), len(interpolated_points))
 
             # Prepare navigation file for the deployment
             column_mapping = {
@@ -239,11 +214,8 @@ class ImageRescuePipeline(BasePipeline):
             # Process each JPG file
             for (jpg_file, rotation), (lat, long, time) in zip(group_jpg_files, interpolated_points):
                 image_id = str(group_image_index).zfill(4)
-
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
-                output_filename = (
-                    f'{platform_id}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
-                )
+                output_filename = f"{platform_id}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG"
 
                 navigation_row = {
                     "filename": output_filename,
@@ -255,7 +227,7 @@ class ImageRescuePipeline(BasePipeline):
                     "latitude": lat,
                     "longitude": long,
                 }
-                print(navigation_row)
+
                 # Add data from column_mapping
                 for col in column_mapping:
                     mapped_col = column_mapping.get(col)
@@ -270,52 +242,42 @@ class ImageRescuePipeline(BasePipeline):
                         else:
                             navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
-                print(navigation_row)
                 navigation_df = navigation_df.append(navigation_row, ignore_index=True)
 
                 input_file_path = camera_roll_path / jpg_file
                 output_file_path = output_stills_directory / output_filename
 
-                print(output_filename, rotation)
                 if not output_file_path.exists():
                     output_stills_directory.mkdir(parents=True, exist_ok=True)
-                    # self.copy_and_rotate_image(input_file_path, output_file_path, rotation)
                     self.move_and_rotate_image(input_file_path, output_file_path, rotation)
-                    self.logger.debug(
-                        f"Copied, sequenced, rotated and renamed {input_file_path.resolve().absolute()} -> {output_filename}"
-                    )
+                    self.logger.debug(f"Processed image {input_file_path} -> {output_filename}")
+
                 group_image_index += 1
-            else:
-                renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 
-                if renamed_stills_list:
-                    # Write out navigation data
-                    navigation_data_path = (
-                        output_data_directory / f'{platform_id}_{survey_id}_{deployment_number}.CSV'
-                    )
-                    output_data_directory.mkdir(parents=True, exist_ok=True)
-                    print(output_data_directory)
-                    navigation_df.to_csv(navigation_data_path, index=False)
+            renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
 
-                    print("Generate thumbnails")
-                    print(output_thumbnails_directory)
+            if renamed_stills_list:
+                # Write out navigation data
+                navigation_data_path = output_data_directory / f"{platform_id}_{survey_id}_{deployment_number}.CSV"
+                output_data_directory.mkdir(parents=True, exist_ok=True)
+                navigation_df.to_csv(navigation_data_path, index=False)
+                self.logger.debug(f"Navigation data saved to {navigation_data_path}")
 
-                    # Generate thumbnails using multithreading
-                    thumbnail_list = multithreaded_generate_thumbnails(
-                        self,
-                        image_list=renamed_stills_list,
-                        output_directory=output_base_directory / "thumbnails",
-                    )
+                # Generate thumbnails
+                thumbnail_list = multithreaded_generate_thumbnails(
+                    self, image_list=renamed_stills_list, output_directory=output_thumbnails_directory
+                )
 
-                    # Create an overview image from the generated thumbnails
-                    thumbnail_overview_path = output_base_directory / "OVERVIEW.JPG"
-                    image.create_grid_image(thumbnail_list, thumbnail_overview_path)
+                # Create an overview image from the generated thumbnails
+                thumbnail_overview_path = output_base_directory / "OVERVIEW.JPG"
+                image.create_grid_image(thumbnail_list, thumbnail_overview_path)
+                self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
 
         # Check and delete empty folders
         for folder in processed_folders:
             if not any(folder.iterdir()):
                 folder.rmdir()
-                print(f"Deleted empty folder: {folder}")
+                self.logger.debug(f"Deleted empty folder: {folder}")
 
     def _package(
         self,
@@ -342,9 +304,7 @@ class ImageRescuePipeline(BasePipeline):
 
         for navigation_data in navigation_data_list:
             navigation_data_df = pd.read_csv(navigation_data)
-            # navigation_data_df["timestamp"] = pd.to_datetime(navigation_data_df["timestamp"], format="%Y-%m-%d %H:%M:%S.%f").dt.floor("S")
 
-            # for file_path in file_paths:
             for index, row in navigation_data_df.iterrows():
                 file_path = navigation_data.parent.parent / "stills" / row["filename"]
                 output_file_path = file_path.relative_to(data_dir)

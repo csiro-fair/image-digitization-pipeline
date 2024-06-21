@@ -26,6 +26,7 @@ from ifdo.models import (
 )
 
 from marimba.core.pipeline import BasePipeline
+from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.parallel import multithreaded_generate_thumbnails
 from marimba.marimba import __version__
@@ -136,9 +137,8 @@ class ImageRescuePipeline(BasePipeline):
 
             survey_id = group.iloc[0]["survey"]
             deployment_number = group.iloc[0]["deployment_no"]
-            output_base_directory = (
-                data_dir / survey_id / self._config.get("platform_id") / f"{survey_id}_{deployment_number}"
-            )
+            platform_id = group.iloc[0]["Platform_abbreviation "]
+            output_base_directory = data_dir / survey_id / platform_id / f"{survey_id}_{deployment_number}"
             output_data_directory = output_base_directory / "data"
             output_stills_directory = output_base_directory / "stills"
             output_thumbnails_directory = output_base_directory / "thumbnails"
@@ -200,11 +200,12 @@ class ImageRescuePipeline(BasePipeline):
                 "VideoLabInventory": "videolab_inventory",
                 "Proj": "project",
                 "Gear": "platform_deployment",
-                "Gear Component": "camera_name",
+                "Gear Component": "platform_name",
                 "Area_name": "area_name",
                 "transect_name": "transect_name",
                 "NOTE": "notes",
                 "Survey_PI": "survey_pi",
+                "orcid": "orcid",
                 "image-context": "image_context",
                 "Abstract": "abstract",
                 "View_Port": "view_port",
@@ -222,12 +223,13 @@ class ImageRescuePipeline(BasePipeline):
                 "longitude",
                 "videolab_inventory",
                 "platform_deployment",
-                "camera_name",
+                "platform_name",
                 "area_name",
                 "transect_name",
                 "approx_depth_range_in_metres",
                 "notes",
                 "survey_pi",
+                "orcid",
                 "image_context",
                 "abstract",
                 "view_port",
@@ -240,12 +242,12 @@ class ImageRescuePipeline(BasePipeline):
 
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
                 output_filename = (
-                    f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
+                    f'{platform_id}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG'
                 )
 
                 navigation_row = {
                     "filename": output_filename,
-                    "platform_id": self._config.get("platform_id"),
+                    "platform_id": platform_id,
                     "survey_id": survey_id,
                     "deployment_number": deployment_number,
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S.%f"),
@@ -264,8 +266,7 @@ class ImageRescuePipeline(BasePipeline):
                     if depth:
                         depth_split = depth.split("-")
                         if len(depth_split) > 1:
-                            # TODO: Double check with Franzis that this is correct
-                            navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{min(depth_split)}"
+                            navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
                         else:
                             navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
@@ -290,7 +291,7 @@ class ImageRescuePipeline(BasePipeline):
                 if renamed_stills_list:
                     # Write out navigation data
                     navigation_data_path = (
-                        output_data_directory / f'{self._config.get("platform_id")}_{survey_id}_{deployment_number}.CSV'
+                        output_data_directory / f'{platform_id}_{survey_id}_{deployment_number}.CSV'
                     )
                     output_data_directory.mkdir(parents=True, exist_ok=True)
                     print(output_data_directory)
@@ -333,7 +334,7 @@ class ImageRescuePipeline(BasePipeline):
 
         # Add ancillary files to data mapping
         for file_path in ancillary_files:
-            if file_path.is_file():
+            if file_path.is_file() and not file_path.suffix.lower() == ".csv#":
                 output_file_path = file_path.relative_to(data_dir)
                 data_mapping[file_path] = output_file_path, None, None
 
@@ -370,7 +371,7 @@ class ImageRescuePipeline(BasePipeline):
                         viewport_extra_description=None,
                     )
 
-                    image_pi = ImagePI(name=row["survey_pi"], orcid="")
+                    image_pi = ImagePI(name=row["survey_pi"], orcid=row["orcid"])
 
                     # "image_id",
                     # "videolab_inventory",
@@ -392,8 +393,8 @@ class ImageRescuePipeline(BasePipeline):
                             image_context=row["image_context"],
                             image_project=row["survey_id"],
                             image_event=f'{row["survey_id"]}_{row["deployment_number"]}',
-                            image_platform=self.config.get("platform_id"),
-                            image_sensor=str(row["camera_name"]).strip(),
+                            image_platform=str(row["platform_name"]).strip(),
+                            image_sensor="Slidefilm Camera",
                             image_uuid=str(uuid4()),
                             # Note: Marimba automatically calculates and injects the SHA256 hash during packaging
                             # image_hash_sha256=image_hash_sha256,
@@ -436,9 +437,12 @@ class ImageRescuePipeline(BasePipeline):
                             # image_temporal_constraints: Optional[str] = None
                             # image_time_synchronization: Optional[str] = None
                             image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
-                            image_curation_protocol=f"Processed with Marimba v{__version__}",
+                            image_curation_protocol=f"Slide-film scanned; "
+                            f"digitised images processed with Marimba v{__version__}",
                             #
                             # # iFDO content (optional)
+                            # Note: Marimba automatically calculates injects image_entropy and image_average_color
+                            # during packaging
                             # image_entropy=0.0,
                             # image_particle_count: Optional[int] = None
                             # image_average_color=[0, 0, 0],
@@ -456,6 +460,37 @@ class ImageRescuePipeline(BasePipeline):
                     ]
 
                     data_mapping[file_path] = output_file_path, image_data_list, row.to_dict()
+
+        # Generate data summaries at the voyage, platform, and deployment level
+        unique_directories = set()
+
+        for file, (output_file_path, image_data_list, _) in data_mapping.items():
+            if image_data_list:
+                parts = output_file_path.parts
+                if len(parts) > 0:
+                    unique_directories.add(parts[0])
+                if len(parts) > 1:
+                    unique_directories.add(str(Path(parts[0]) / parts[1]))
+
+        # Convert the set to a sorted list
+        unique_directories = sorted(unique_directories)
+
+        # Subset the data_mapping to include only files in the unique directories
+        for directory in unique_directories:
+            subset_data_mapping = {
+                str(file): image_data_list
+                for file, (output_file_path, image_data_list, additional_info) in data_mapping.items()
+                if str(output_file_path).startswith(directory) and image_data_list
+            }
+
+            # Create a dataset summary for each of these
+            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None)
+            dataset_wrapper.summary_name = "SUMMARY.MD"
+            dataset_wrapper._generate_dataset_summary(subset_data_mapping, progress=False)
+
+            # Add the summary to the dataset mapping
+            output_file_path = dataset_wrapper.summary_path.relative_to(data_dir)
+            data_mapping[dataset_wrapper.summary_path] = output_file_path, None, None
 
         return data_mapping
 

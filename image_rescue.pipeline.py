@@ -39,9 +39,7 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def get_pipeline_config_schema() -> dict:
-        return {
-            "platform_id": "PS1000",
-        }
+        return {}
 
     @staticmethod
     def get_collection_config_schema() -> dict:
@@ -242,7 +240,7 @@ class ImageRescuePipeline(BasePipeline):
                         else:
                             navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
-                navigation_df = navigation_df.append(navigation_row, ignore_index=True)
+                navigation_df = pd.concat([navigation_df, pd.DataFrame([navigation_row])], ignore_index=True)
 
                 input_file_path = camera_roll_path / jpg_file
                 output_file_path = output_stills_directory / output_filename

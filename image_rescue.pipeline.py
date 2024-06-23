@@ -258,8 +258,9 @@ class ImageRescuePipeline(BasePipeline):
                 # Write out navigation data
                 navigation_data_path = output_data_directory / f"{platform_id}_{survey_id}_{deployment_number}.CSV"
                 output_data_directory.mkdir(parents=True, exist_ok=True)
-                navigation_df.to_csv(navigation_data_path, index=False)
-                self.logger.debug(f"Navigation data saved to {navigation_data_path}")
+                if not navigation_data_path.exists():
+                    navigation_df.to_csv(navigation_data_path, index=False)
+                    self.logger.debug(f"Navigation data saved to {navigation_data_path}")
 
                 # Generate thumbnails
                 thumbnail_list = multithreaded_generate_thumbnails(
@@ -419,36 +420,60 @@ class ImageRescuePipeline(BasePipeline):
 
                     data_mapping[file_path] = output_file_path, image_data_list, row.to_dict()
 
-        # Generate data summaries at the voyage, platform, and deployment level
-        unique_directories = set()
+        # Generate data summaries at the voyage and platform levels, and an iFDO at the deployment level
+        summary_directories = set()
+        ifdo_directories = set()
 
-        for file, (output_file_path, image_data_list, _) in data_mapping.items():
+        # Collect output directories
+        for src, (relative_dst, image_data_list, _) in data_mapping.items():
             if image_data_list:
-                parts = output_file_path.parts
+                parts = relative_dst.parts
                 if len(parts) > 0:
-                    unique_directories.add(parts[0])
+                    summary_directories.add(parts[0])
                 if len(parts) > 1:
-                    unique_directories.add(str(Path(parts[0]) / parts[1]))
+                    summary_directories.add(str(Path(parts[0]) / parts[1]))
+                if len(parts) > 2:
+                    ifdo_directories.add(str(Path(parts[0]) / parts[1] / parts[2]))
 
         # Convert the set to a sorted list
-        unique_directories = sorted(unique_directories)
+        summary_directories = sorted(summary_directories)
+        ifdo_directories = sorted(ifdo_directories)
 
-        # Subset the data_mapping to include only files in the unique directories
-        for directory in unique_directories:
+        # Subset the data_mapping to include only files in the summary directories
+        for directory in summary_directories:
             subset_data_mapping = {
-                str(file): image_data_list
-                for file, (output_file_path, image_data_list, additional_info) in data_mapping.items()
-                if str(output_file_path).startswith(directory) and image_data_list
+                src.as_posix(): image_data_list
+                for src, (relative_dst, image_data_list, _) in data_mapping.items()
+                if str(relative_dst).startswith(directory) and image_data_list
             }
 
             # Create a dataset summary for each of these
-            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None)
+            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
+            dataset_wrapper.dry_run = False
             dataset_wrapper.summary_name = "SUMMARY.MD"
-            dataset_wrapper._generate_dataset_summary(subset_data_mapping, progress=False)
+            dataset_wrapper.generate_dataset_summary(subset_data_mapping, progress=False)
 
             # Add the summary to the dataset mapping
             output_file_path = dataset_wrapper.summary_path.relative_to(data_dir)
             data_mapping[dataset_wrapper.summary_path] = output_file_path, None, None
+
+        # Subset the data_mapping to include only files in the ifdo directories
+        for directory in ifdo_directories:
+            subset_data_mapping = {
+                relative_dst.relative_to(directory).as_posix(): image_data_list
+                for src, (relative_dst, image_data_list, _) in data_mapping.items()
+                if str(relative_dst).startswith(directory) and image_data_list
+            }
+
+            # Create a iFDO for each of these
+            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
+            dataset_wrapper.dry_run = False
+            dataset_wrapper.metadata_name = "IFDO.YML"
+            dataset_wrapper.generate_ifdo(directory, subset_data_mapping, progress=False)
+
+            # Add the iFDO to the dataset mapping
+            output_file_path = dataset_wrapper.metadata_path.relative_to(data_dir)
+            data_mapping[dataset_wrapper.metadata_path] = output_file_path, None, None
 
         return data_mapping
 

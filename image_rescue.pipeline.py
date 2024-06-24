@@ -28,7 +28,7 @@ from ifdo.models import (
 from marimba.core.pipeline import BasePipeline
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
-from marimba.lib.parallel import multithreaded_generate_thumbnails
+from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
 from marimba.marimba import __version__
 
 
@@ -263,7 +263,7 @@ class ImageRescuePipeline(BasePipeline):
                     self.logger.debug(f"Navigation data saved to {navigation_data_path}")
 
                 # Generate thumbnails
-                thumbnail_list = multithreaded_generate_thumbnails(
+                thumbnail_list = multithreaded_generate_image_thumbnails(
                     self, image_list=renamed_stills_list, output_directory=output_thumbnails_directory
                 )
 

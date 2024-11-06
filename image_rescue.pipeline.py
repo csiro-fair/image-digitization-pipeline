@@ -2,13 +2,12 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any
 from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 import piexif
-from PIL import Image
 from ifdo.models import (
     CameraHousingViewport,
     ImageAcquisition,
@@ -24,12 +23,12 @@ from ifdo.models import (
     ImageQuality,
     ImageSpectralResolution,
 )
-
 from marimba.core.pipeline import BasePipeline
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
 from marimba.main import __version__
+from PIL import Image
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -54,7 +53,7 @@ class ImageRescuePipeline(BasePipeline):
         self,
         data_dir: Path,
         source_path: Path,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         **kwargs: dict,
     ) -> None:
         self.logger.info(f"Importing data from {source_path} to {data_dir}")
@@ -86,30 +85,30 @@ class ImageRescuePipeline(BasePipeline):
     def create_navigation_df(self) -> pd.DataFrame:
         """Create an empty navigation DataFrame with proper dtypes."""
         return pd.DataFrame({
-            'filename': pd.Series(dtype='str'),
-            'platform_id': pd.Series(dtype='str'),
-            'survey_id': pd.Series(dtype='str'),
-            'deployment_number': pd.Series(dtype='str'),
-            'timestamp': pd.Series(dtype='str'),
-            'image_id': pd.Series(dtype='str'),
-            'project': pd.Series(dtype='str'),
-            'latitude': pd.Series(dtype='float64'),
-            'longitude': pd.Series(dtype='float64'),
-            'videolab_inventory': pd.Series(dtype='str'),
-            'platform_deployment': pd.Series(dtype='str'),
-            'platform_name': pd.Series(dtype='str'),
-            'area_name': pd.Series(dtype='str'),
-            'transect_name': pd.Series(dtype='str'),
-            'approx_depth_range_in_metres': pd.Series(dtype='str'),
-            'notes': pd.Series(dtype='str'),
-            'survey_pi': pd.Series(dtype='str'),
-            'orcid': pd.Series(dtype='str'),
-            'image_context': pd.Series(dtype='str'),
-            'abstract': pd.Series(dtype='str'),
-            'view_port': pd.Series(dtype='str')
+            "filename": pd.Series(dtype="str"),
+            "platform_id": pd.Series(dtype="str"),
+            "survey_id": pd.Series(dtype="str"),
+            "deployment_number": pd.Series(dtype="str"),
+            "timestamp": pd.Series(dtype="str"),
+            "image_id": pd.Series(dtype="str"),
+            "project": pd.Series(dtype="str"),
+            "latitude": pd.Series(dtype="float64"),
+            "longitude": pd.Series(dtype="float64"),
+            "videolab_inventory": pd.Series(dtype="str"),
+            "platform_deployment": pd.Series(dtype="str"),
+            "platform_name": pd.Series(dtype="str"),
+            "area_name": pd.Series(dtype="str"),
+            "transect_name": pd.Series(dtype="str"),
+            "approx_depth_range_in_metres": pd.Series(dtype="str"),
+            "notes": pd.Series(dtype="str"),
+            "survey_pi": pd.Series(dtype="str"),
+            "orcid": pd.Series(dtype="str"),
+            "image_context": pd.Series(dtype="str"),
+            "abstract": pd.Series(dtype="str"),
+            "view_port": pd.Series(dtype="str"),
         })
 
-    def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
+    def _process(self, data_dir: Path, config: dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes
         copy2(config.get("batch_data_path"), data_dir)
         batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
@@ -186,12 +185,12 @@ class ImageRescuePipeline(BasePipeline):
 
             self.logger.debug(
                 f"Survey ID: {survey_id}, Deployment: {deployment_number}, Stills Dir: {output_stills_directory}, "
-                f"Start: ({start_lat}, {start_long}), End: ({end_lat}, {end_long}), Time: ({start_time}, {end_time})"
+                f"Start: ({start_lat}, {start_long}), End: ({end_lat}, {end_long}), Time: ({start_time}, {end_time})",
             )
 
             # Interpolate geo-coordinates and timestamps
             interpolated_points = self.interpolate_points(
-                start_lat, start_long, end_lat, end_long, start_time, end_time, n_points
+                start_lat, start_long, end_lat, end_long, start_time, end_time, n_points,
             )
 
             # Prepare navigation file for the deployment
@@ -236,7 +235,7 @@ class ImageRescuePipeline(BasePipeline):
             navigation_df = pd.DataFrame(columns=navigation_columns)
 
             # Process each JPG file
-            for (jpg_file, rotation), (lat, long, time) in zip(group_jpg_files, interpolated_points):
+            for (jpg_file, rotation), (lat, long, time) in zip(group_jpg_files, interpolated_points, strict=False):
                 image_id = str(group_image_index).zfill(4)
                 timestamp = time.strftime("%Y%m%dT%H%M%SZ")
                 output_filename = f"{platform_id}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG"
@@ -257,14 +256,13 @@ class ImageRescuePipeline(BasePipeline):
                     mapped_col = column_mapping.get(col)
                     if mapped_col and col in group.iloc[0]:
                         navigation_row[mapped_col] = group.iloc[0][col]
-                else:
-                    depth = group.iloc[0]["Depth approx range (m)"]
-                    if depth:
-                        depth_split = depth.split("-")
-                        if len(depth_split) > 1:
-                            navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
-                        else:
-                            navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
+                depth = group.iloc[0]["Depth approx range (m)"]
+                if depth:
+                    depth_split = depth.split("-")
+                    if len(depth_split) > 1:
+                        navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
+                    else:
+                        navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
                 # Initialize empty navigation DataFrame with proper dtypes
                 navigation_df = self.create_navigation_df()
@@ -291,7 +289,7 @@ class ImageRescuePipeline(BasePipeline):
 
                 # Generate thumbnails
                 thumbnail_list = multithreaded_generate_image_thumbnails(
-                    self, image_list=renamed_stills_list, output_directory=output_thumbnails_directory
+                    self, image_list=renamed_stills_list, output_directory=output_thumbnails_directory,
                 )
 
                 # Create an overview image from the generated thumbnails
@@ -308,10 +306,10 @@ class ImageRescuePipeline(BasePipeline):
     def _package(
         self,
         data_dir: Path,
-        config: Dict[str, Any],
-        **kwargs: Dict[str, Any],
-    ) -> Dict[Path, Tuple[Path, Optional[ImageData], Optional[Dict[str, Any]]]]:
-        data_mapping: Dict[Path, Tuple[Path, Optional[List[ImageData]], Optional[Dict[str, Any]]]] = {}
+        config: dict[str, Any],
+        **kwargs: dict[str, Any],
+    ) -> dict[Path, tuple[Path, ImageData | None, dict[str, Any] | None]]:
+        data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]] = {}
 
         # List all files in the root directory recursively
         all_files = data_dir.glob("**/*")
@@ -322,7 +320,7 @@ class ImageRescuePipeline(BasePipeline):
 
         # Add ancillary files to data mapping
         for file_path in ancillary_files:
-            if file_path.is_file() and not file_path.suffix.lower() == ".csv#":
+            if file_path.is_file() and file_path.suffix.lower() != ".csv#":
                 output_file_path = file_path.relative_to(data_dir)
                 data_mapping[file_path] = output_file_path, None, None
 
@@ -442,7 +440,7 @@ class ImageRescuePipeline(BasePipeline):
                             # image_annotation_labels: Optional[List[ImageAnnotationLabel]] = None
                             # image_annotation_creators: Optional[List[ImageAnnotationCreator]] = None
                             # image_annotations: Optional[List[ImageAnnotation]] = None
-                        )
+                        ),
                     ]
 
                     data_mapping[file_path] = output_file_path, image_data_list, row.to_dict()
@@ -547,23 +545,21 @@ class ImageRescuePipeline(BasePipeline):
         if all(pd.notna(val) for val in [start_lat, end_lat, start_long, end_long]):
             lats = np.linspace(float(start_lat), float(end_lat), n_points).tolist()
             longs = np.linspace(float(start_long), float(end_long), n_points).tolist()
-        else:
-            # If unavailable, use start_lat and start_long for all points if they are valid
-            if (
-                pd.notna(start_lat)
-                and pd.notna(start_long)
-                and isinstance(start_lat, (int, float))
-                and isinstance(start_long, (int, float))
-            ):
-                lats = [start_lat] * n_points
-                longs = [start_long] * n_points
+        # If unavailable, use start_lat and start_long for all points if they are valid
+        elif (
+            pd.notna(start_lat)
+            and pd.notna(start_long)
+            and isinstance(start_lat, (int, float))
+            and isinstance(start_long, (int, float))
+        ):
+            lats = [start_lat] * n_points
+            longs = [start_long] * n_points
 
         # Check for availability before timestamp interpolation
         if pd.notna(start_time) and pd.notna(end_time):
             times = pd.date_range(start_time, end_time, periods=n_points).tolist()
-        else:
-            # If end_time is unavailable, use start_time for all points if it is valid
-            if pd.notna(start_time):
-                times = [pd.Timestamp(start_time)] * n_points
+        # If end_time is unavailable, use start_time for all points if it is valid
+        elif pd.notna(start_time):
+            times = [pd.Timestamp(start_time)] * n_points
 
-        return list(zip(lats, longs, times))
+        return list(zip(lats, longs, times, strict=False))

@@ -144,195 +144,307 @@ class ImageRescuePipeline(BasePipeline):
             config: dict[str, Any],
             **kwargs: dict,  # noqa: ARG002
     ) -> None:
-        # Copy CSV files to data directory and load into dataframes
-        copy2(config.get("batch_data_path"), data_dir)
-        batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
-        inventory_df = pd.read_excel(config.get("inventory_data_path"), sheet_name="SlideRescue_all")
-
-        # Convert and save as CSV
-        inventory_df.to_csv((data_dir / Path(config.get("inventory_data_path")).stem).with_suffix(".csv"), index=False)
-
-        # Merge dataframes on common columns
+        # Load and prepare data
+        batch_data_df, inventory_df = self._load_input_data(data_dir, config)
         merged_df = inventory_df.merge(batch_data_df, on="Survey_Stn")
-
-        # Group the DataFrame by 'Survey_Stn' column
         grouped = merged_df.groupby("Survey_Stn")
 
-        # Set to track folders that have images moved out of them
+        # Track folders that have had images processed
         processed_folders = set()
 
-        # Loop through each group
+        # Process each survey station group
         for name, group in grouped:
-            group_image_index = 1
-            sorted_group = group.sort_values(by="sequence")
             self.logger.debug(f"Processing group: {name}")
+            self._process_survey_station(data_dir, group, processed_folders)
 
-            # List to store all found jpg files
-            group_jpg_files = []
+        # Clean up empty processed folders
+        self._cleanup_empty_folders(processed_folders)
 
-            # Iterate through each directory and glob for jpg files
-            for _index, row in sorted_group.iterrows():
-                camera_roll_path = data_dir / str(row["folder_name"]).zfill(8)
+    def _load_input_data(self, data_dir: Path, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Load and prepare input data from batch and inventory files."""
+        # Copy and load batch data
+        copy2(config.get("batch_data_path"), data_dir)
+        batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
 
-                # Skip if the directory does not exist
-                if not camera_roll_path.exists():
-                    self.logger.debug(f"Camera roll path does not exist: {camera_roll_path}")
-                    continue
+        # Load and convert inventory data
+        inventory_df = pd.read_excel(config.get("inventory_data_path"), sheet_name="SlideRescue_all")
+        inventory_df.to_csv(
+            (data_dir / Path(config.get("inventory_data_path")).stem).with_suffix(".csv"),
+            index=False,
+        )
 
-                folder_jpg_files = sorted(camera_roll_path.glob("*.jpg"), reverse=bool(row["order"]))
-                folder_jpg_files_with_rotation = [(item, row["rotation "]) for item in folder_jpg_files]
-                group_jpg_files.extend(folder_jpg_files_with_rotation)
+        return batch_data_df, inventory_df
 
-                # Track processed folders
-                if folder_jpg_files:
-                    processed_folders.add(camera_roll_path)
+    def _process_survey_station(self, data_dir: Path, group: pd.DataFrame, processed_folders: set) -> None:
+        """Process a single survey station group."""
+        # Collect image files and their rotation information
+        group_jpg_files = self._collect_image_files(data_dir, group, processed_folders)
+        if not group_jpg_files:
+            return
 
-            n_points = len(group_jpg_files)
+        # Get deployment information and prepare output directories
+        output_info = self._prepare_output_directories(data_dir, group)
 
-            survey_id = group.iloc[0]["survey"]
-            deployment_number = group.iloc[0]["deployment_no"]
-            platform_id = group.iloc[0]["Platform_abbreviation "]
-            output_base_directory = data_dir / survey_id / platform_id / f"{survey_id}_{deployment_number}"
-            output_data_directory = output_base_directory / "data"
-            output_stills_directory = output_base_directory / "stills"
-            output_thumbnails_directory = output_base_directory / "thumbnails"
+        # Get coordinates and timestamps
+        geo_time_info = self._get_geo_time_info(group)
 
-            # Collect start and end coordinates and timestamps
-            start_lat, start_long = group.iloc[0]["start_lat"], group.iloc[0]["start_long"]
-            end_lat, end_long = group.iloc[0]["end_lat"], group.iloc[0]["end_long"]
-            start_time, end_time, utc_offset = (
-                group.iloc[0]["Starte date/time"],
-                group.iloc[0]["End Date/time"],
-                group.iloc[0]["UTC offset"],
+        self._log_processing_details(output_info, geo_time_info)
+
+        # Process images and create navigation data
+        self._process_images_and_navigation(
+            group_jpg_files,
+            output_info,
+            geo_time_info,
+            group,
+        )
+
+    def _collect_image_files(
+            self,
+            data_dir: Path,
+            group: pd.DataFrame,
+            processed_folders: set,
+    ) -> list[tuple[Path, int]]:
+        """Collect all image files for a survey station."""
+        group_jpg_files = []
+        sorted_group = group.sort_values(by="sequence")
+
+        for _index, row in sorted_group.iterrows():
+            camera_roll_path = data_dir / str(row["folder_name"]).zfill(8)
+
+            if not camera_roll_path.exists():
+                self.logger.debug(f"Camera roll path does not exist: {camera_roll_path}")
+                continue
+
+            folder_jpg_files = sorted(camera_roll_path.glob("*.jpg"), reverse=bool(row["order"]))
+            folder_jpg_files_with_rotation = [(item, row["rotation "]) for item in folder_jpg_files]
+            group_jpg_files.extend(folder_jpg_files_with_rotation)
+
+            if folder_jpg_files:
+                processed_folders.add(camera_roll_path)
+
+        return group_jpg_files
+
+    def _prepare_output_directories(self, data_dir: Path, group: pd.DataFrame) -> dict:
+        """Prepare output directory structure and return relevant paths."""
+        survey_id = group.iloc[0]["survey"]
+        deployment_number = group.iloc[0]["deployment_no"]
+        platform_id = group.iloc[0]["Platform_abbreviation "]
+
+        output_base_directory = data_dir / survey_id / platform_id / f"{survey_id}_{deployment_number}"
+        return {
+            "base_dir": output_base_directory,
+            "data_dir": output_base_directory / "data",
+            "stills_dir": output_base_directory / "stills",
+            "thumbnails_dir": output_base_directory / "thumbnails",
+            "survey_id": survey_id,
+            "deployment_number": deployment_number,
+            "platform_id": platform_id,
+        }
+
+    def _get_geo_time_info(self, group: pd.DataFrame) -> dict:
+        """Extract and process geographic and temporal information."""
+        start_lat, start_long = group.iloc[0]["start_lat"], group.iloc[0]["start_long"]
+        end_lat, end_long = group.iloc[0]["end_lat"], group.iloc[0]["end_long"]
+        start_time = group.iloc[0]["Starte date/time"]
+        end_time = group.iloc[0]["End Date/time"]
+        utc_offset = group.iloc[0]["UTC offset"] or 10
+
+        # Adjust timestamps for UTC offset
+        offset = timedelta(hours=utc_offset)
+        if start_time:
+            start_time += offset
+        if end_time:
+            end_time += offset
+
+        return {
+            "start_lat": start_lat,
+            "start_long": start_long,
+            "end_lat": end_lat,
+            "end_long": end_long,
+            "start_time": start_time,
+            "end_time": end_time,
+        }
+
+    def _process_images_and_navigation(
+            self,
+            group_jpg_files: list[tuple[Path, int]],
+            output_info: dict,
+            geo_time_info: dict,
+            group: pd.DataFrame,
+    ) -> None:
+        """Process images and create navigation data for a survey station."""
+        n_points = len(group_jpg_files)
+        interpolated_points = self.interpolate_points(
+            geo_time_info["start_lat"],
+            geo_time_info["start_long"],
+            geo_time_info["end_lat"],
+            geo_time_info["end_long"],
+            geo_time_info["start_time"],
+            geo_time_info["end_time"],
+            n_points,
+        )
+
+        navigation_df = self._process_image_files(
+            group_jpg_files,
+            interpolated_points,
+            output_info,
+            group,
+        )
+
+        renamed_stills_list = list(output_info["stills_dir"].glob("*.JPG"))
+        if renamed_stills_list:
+            self._create_output_files(renamed_stills_list, navigation_df, output_info)
+
+    def _process_image_files(
+            self,
+            group_jpg_files: list[tuple[Path, int]],
+            interpolated_points: list[tuple[float, float, datetime]],
+            output_info: dict,
+            group: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Process individual image files and create navigation data."""
+        navigation_df = self.create_navigation_df()
+        column_mapping = self._get_column_mapping()
+
+        for group_image_index, ((jpg_file, rotation), (lat, long, time)) in enumerate(
+                zip(group_jpg_files, interpolated_points, strict=False),
+                start=1,
+        ):
+            image_id = str(group_image_index).zfill(4)
+            timestamp = time.strftime("%Y%m%dT%H%M%SZ")
+            output_filename = (
+                f"{output_info['platform_id']}_{output_info['survey_id']}_"
+                f"{output_info['deployment_number']}_{timestamp}_{image_id}.JPG"
             )
 
-            if not utc_offset:
-                utc_offset = 10
+            navigation_row = self._create_navigation_row(
+                output_filename, output_info, time, lat, long,
+                image_id, group, column_mapping,
+            )
+            navigation_df = pd.concat([navigation_df, pd.DataFrame([navigation_row])], ignore_index=True)
 
-            # Create a timedelta object for the offset
-            offset = timedelta(hours=utc_offset)
-
-            # Adjust timestamps for the UTC offset
-            if start_time:
-                start_time = start_time + offset
-            if end_time:
-                end_time = end_time + offset
-
-            self.logger.debug(
-                f"Survey ID: {survey_id}, Deployment: {deployment_number}, Stills Dir: {output_stills_directory}, "
-                f"Start: ({start_lat}, {start_long}), End: ({end_lat}, {end_long}), Time: ({start_time}, {end_time})",
+            self._process_single_image(
+                jpg_file,
+                output_filename,
+                rotation,
+                output_info["stills_dir"],
             )
 
-            # Interpolate geo-coordinates and timestamps
-            interpolated_points = self.interpolate_points(
-                start_lat, start_long, end_lat, end_long, start_time, end_time, n_points,
-            )
+        return navigation_df
 
-            # Prepare navigation file for the deployment
-            column_mapping = {
-                "VideoLabInventory": "videolab_inventory",
-                "Proj": "project",
-                "Gear": "platform_deployment",
-                "Gear Component": "platform_name",
-                "Area_name": "area_name",
-                "transect_name": "transect_name",
-                "NOTE": "notes",
-                "Survey_PI": "survey_pi",
-                "orcid": "orcid",
-                "image-context": "image_context",
-                "Abstract": "abstract",
-                "View_Port": "view_port",
-            }
+    def _get_column_mapping(self) -> dict[str, str]:
+        """Return the column mapping for navigation data."""
+        return {
+            "VideoLabInventory": "videolab_inventory",
+            "Proj": "project",
+            "Gear": "platform_deployment",
+            "Gear Component": "platform_name",
+            "Area_name": "area_name",
+            "transect_name": "transect_name",
+            "NOTE": "notes",
+            "Survey_PI": "survey_pi",
+            "orcid": "orcid",
+            "image-context": "image_context",
+            "Abstract": "abstract",
+            "View_Port": "view_port",
+        }
 
-            navigation_columns = [
-                "filename",
-                "platform_id",
-                "survey_id",
-                "deployment_number",
-                "timestamp",
-                "image_id",
-                "project",
-                "latitude",
-                "longitude",
-                "videolab_inventory",
-                "platform_deployment",
-                "platform_name",
-                "area_name",
-                "transect_name",
-                "approx_depth_range_in_metres",
-                "notes",
-                "survey_pi",
-                "orcid",
-                "image_context",
-                "abstract",
-                "view_port",
-            ]
-            navigation_df = pd.DataFrame(columns=navigation_columns)
+    def _create_navigation_row(
+            self,
+            output_filename: str,
+            output_info: dict,
+            time: datetime,
+            lat: float,
+            long: float,
+            image_id: str,
+            group: pd.DataFrame,
+            column_mapping: dict,
+    ) -> dict:
+        """Create a navigation data row for an image."""
+        navigation_row = {
+            "filename": output_filename,
+            "platform_id": output_info["platform_id"],
+            "survey_id": output_info["survey_id"],
+            "deployment_number": output_info["deployment_number"],
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "image_id": image_id,
+            "latitude": lat,
+            "longitude": long,
+        }
 
-            # Process each JPG file
-            for (jpg_file, rotation), (lat, long, time) in zip(group_jpg_files, interpolated_points, strict=False):
-                image_id = str(group_image_index).zfill(4)
-                timestamp = time.strftime("%Y%m%dT%H%M%SZ")
-                output_filename = f"{platform_id}_{survey_id}_{deployment_number}_{timestamp}_{image_id}.JPG"
+        # Add mapped columns
+        for col, mapped_col in column_mapping.items():
+            if col in group.iloc[0]:
+                navigation_row[mapped_col] = group.iloc[0][col]
 
-                navigation_row = {
-                    "filename": output_filename,
-                    "platform_id": platform_id,
-                    "survey_id": survey_id,
-                    "deployment_number": deployment_number,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S.%f"),
-                    "image_id": image_id,
-                    "latitude": lat,
-                    "longitude": long,
-                }
+        # Process depth information
+        depth = group.iloc[0]["Depth approx range (m)"]
+        if depth:
+            depth_split = depth.split("-")
+            if len(depth_split) > 1:
+                navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
+            else:
+                navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
-                # Add data from column_mapping
-                for col in column_mapping:
-                    mapped_col = column_mapping.get(col)
-                    if mapped_col and col in group.iloc[0]:
-                        navigation_row[mapped_col] = group.iloc[0][col]
-                depth = group.iloc[0]["Depth approx range (m)"]
-                if depth:
-                    depth_split = depth.split("-")
-                    if len(depth_split) > 1:
-                        navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
-                    else:
-                        navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
+        return navigation_row
 
-                # Initialize empty navigation DataFrame with proper dtypes
-                navigation_df = self.create_navigation_df()
+    def _process_single_image(
+            self,
+            jpg_file: Path,
+            output_filename: str,
+            rotation: int,
+            output_stills_dir: Path,
+    ) -> None:
+        """Process a single image file."""
+        output_file_path = output_stills_dir / output_filename
 
-                input_file_path = camera_roll_path / jpg_file
-                output_file_path = output_stills_directory / output_filename
+        if not output_file_path.exists():
+            output_stills_dir.mkdir(parents=True, exist_ok=True)
+            self.move_and_rotate_image(jpg_file, output_file_path, rotation)
+            self.logger.debug(f"Processed image {jpg_file} -> {output_filename}")
 
-                if not output_file_path.exists():
-                    output_stills_directory.mkdir(parents=True, exist_ok=True)
-                    self.move_and_rotate_image(input_file_path, output_file_path, rotation)
-                    self.logger.debug(f"Processed image {input_file_path} -> {output_filename}")
+    def _create_output_files(
+            self,
+            renamed_stills_list: list[Path],
+            navigation_df: pd.DataFrame,
+            output_info: dict,
+    ) -> None:
+        """Create navigation data file and generate thumbnails."""
+        # Save navigation data
+        navigation_data_path = (
+                output_info["data_dir"] /
+                f"{output_info['platform_id']}_{output_info['survey_id']}_{output_info['deployment_number']}.CSV"
+        )
+        if not navigation_data_path.parent.exists():
+            navigation_data_path.parent.mkdir(parents=True)
+        if not navigation_data_path.exists():
+            navigation_df.to_csv(navigation_data_path, index=False)
+            self.logger.debug(f"Navigation data saved to {navigation_data_path}")
 
-                group_image_index += 1
+        # Generate thumbnails and overview image
+        thumbnail_list = multithreaded_generate_image_thumbnails(
+            self,
+            image_list=renamed_stills_list,
+            output_directory=output_info["thumbnails_dir"],
+        )
 
-            renamed_stills_list = list(output_stills_directory.glob("*.JPG"))
+        thumbnail_overview_path = output_info["base_dir"] / "overview.jpg"
+        image.create_grid_image(thumbnail_list, thumbnail_overview_path)
+        self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
 
-            if renamed_stills_list:
-                # Write out navigation data
-                navigation_data_path = output_data_directory / f"{platform_id}_{survey_id}_{deployment_number}.CSV"
-                output_data_directory.mkdir(parents=True, exist_ok=True)
-                if not navigation_data_path.exists():
-                    navigation_df.to_csv(navigation_data_path, index=False)
-                    self.logger.debug(f"Navigation data saved to {navigation_data_path}")
+    def _log_processing_details(self, output_info: dict, geo_time_info: dict) -> None:
+        """Log processing details for debugging."""
+        self.logger.debug(
+            f"Survey ID: {output_info['survey_id']}, "
+            f"Deployment: {output_info['deployment_number']}, "
+            f"Stills Dir: {output_info['stills_dir']}, "
+            f"Start: ({geo_time_info['start_lat']}, {geo_time_info['start_long']}), "
+            f"End: ({geo_time_info['end_lat']}, {geo_time_info['end_long']}), "
+            f"Time: ({geo_time_info['start_time']}, {geo_time_info['end_time']})",
+        )
 
-                # Generate thumbnails
-                thumbnail_list = multithreaded_generate_image_thumbnails(
-                    self, image_list=renamed_stills_list, output_directory=output_thumbnails_directory,
-                )
-
-                # Create an overview image from the generated thumbnails
-                thumbnail_overview_path = output_base_directory / "overview.jpg"
-                image.create_grid_image(thumbnail_list, thumbnail_overview_path)
-                self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
-
-        # Check and delete empty folders
+    def _cleanup_empty_folders(self, processed_folders: set) -> None:
+        """Remove empty folders after processing."""
         for folder in processed_folders:
             if not any(folder.iterdir()):
                 folder.rmdir()

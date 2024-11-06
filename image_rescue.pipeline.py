@@ -77,7 +77,7 @@ class ImageRescuePipeline(BasePipeline):
             data_dir: Path,
             source_path: Path,
             config: dict[str, Any],
-            **kwargs: dict,  # noqa: ARG002
+            **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> None:
         self.logger.info(f"Importing data from {source_path} to {data_dir}")
 
@@ -142,7 +142,7 @@ class ImageRescuePipeline(BasePipeline):
             self,
             data_dir: Path,
             config: dict[str, Any],
-            **kwargs: dict,  # noqa: ARG002
+            **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> None:
         # Load and prepare data
         batch_data_df, inventory_df = self._load_input_data(data_dir, config)
@@ -150,7 +150,7 @@ class ImageRescuePipeline(BasePipeline):
         grouped = merged_df.groupby("Survey_Stn")
 
         # Track folders that have had images processed
-        processed_folders = set()
+        processed_folders: set[Path] = set()
 
         # Process each survey station group
         for name, group in grouped:
@@ -162,20 +162,29 @@ class ImageRescuePipeline(BasePipeline):
 
     def _load_input_data(self, data_dir: Path, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Load and prepare input data from batch and inventory files."""
+        # Get paths from config with type checking
+        batch_data_path = config.get("batch_data_path")
+        if not batch_data_path:
+            raise ValueError("batch_data_path not found in config")
+
+        inventory_data_path = config.get("inventory_data_path")
+        if not inventory_data_path:
+            raise ValueError("inventory_data_path not found in config")
+
         # Copy and load batch data
-        copy2(config.get("batch_data_path"), data_dir)
-        batch_data_df = pd.read_csv(data_dir / Path(config.get("batch_data_path")).name)
+        copy2(str(batch_data_path), data_dir)
+        batch_data_df = pd.read_csv(data_dir / Path(batch_data_path).name)
 
         # Load and convert inventory data
-        inventory_df = pd.read_excel(config.get("inventory_data_path"), sheet_name="SlideRescue_all")
+        inventory_df = pd.read_excel(inventory_data_path, sheet_name="SlideRescue_all")
         inventory_df.to_csv(
-            (data_dir / Path(config.get("inventory_data_path")).stem).with_suffix(".csv"),
+            (data_dir / Path(inventory_data_path).stem).with_suffix(".csv"),
             index=False,
         )
 
         return batch_data_df, inventory_df
 
-    def _process_survey_station(self, data_dir: Path, group: pd.DataFrame, processed_folders: set) -> None:
+    def _process_survey_station(self, data_dir: Path, group: pd.DataFrame, processed_folders: set[Path]) -> None:
         """Process a single survey station group."""
         # Collect image files and their rotation information
         group_jpg_files = self._collect_image_files(data_dir, group, processed_folders)
@@ -202,7 +211,7 @@ class ImageRescuePipeline(BasePipeline):
             self,
             data_dir: Path,
             group: pd.DataFrame,
-            processed_folders: set,
+            processed_folders: set[Path],
     ) -> list[tuple[Path, int]]:
         """Collect all image files for a survey station."""
         group_jpg_files = []
@@ -224,7 +233,7 @@ class ImageRescuePipeline(BasePipeline):
 
         return group_jpg_files
 
-    def _prepare_output_directories(self, data_dir: Path, group: pd.DataFrame) -> dict:
+    def _prepare_output_directories(self, data_dir: Path, group: pd.DataFrame) -> dict[str, Any]:
         """Prepare output directory structure and return relevant paths."""
         survey_id = group.iloc[0]["survey"]
         deployment_number = group.iloc[0]["deployment_no"]
@@ -241,7 +250,7 @@ class ImageRescuePipeline(BasePipeline):
             "platform_id": platform_id,
         }
 
-    def _get_geo_time_info(self, group: pd.DataFrame) -> dict:
+    def _get_geo_time_info(self, group: pd.DataFrame) -> dict[str, Any]:
         """Extract and process geographic and temporal information."""
         start_lat, start_long = group.iloc[0]["start_lat"], group.iloc[0]["start_long"]
         end_lat, end_long = group.iloc[0]["end_lat"], group.iloc[0]["end_long"]
@@ -268,8 +277,8 @@ class ImageRescuePipeline(BasePipeline):
     def _process_images_and_navigation(
             self,
             group_jpg_files: list[tuple[Path, int]],
-            output_info: dict,
-            geo_time_info: dict,
+            output_info: dict[str, Any],
+            geo_time_info: dict[str, Any],
             group: pd.DataFrame,
     ) -> None:
         """Process images and create navigation data for a survey station."""
@@ -298,8 +307,8 @@ class ImageRescuePipeline(BasePipeline):
     def _process_image_files(
             self,
             group_jpg_files: list[tuple[Path, int]],
-            interpolated_points: list[tuple[float, float, datetime]],
-            output_info: dict,
+            interpolated_points: list[tuple[float | None, float | None, pd.Timestamp | None]],
+            output_info: dict[str, Any],
             group: pd.DataFrame,
     ) -> pd.DataFrame:
         """Process individual image files and create navigation data."""
@@ -311,15 +320,21 @@ class ImageRescuePipeline(BasePipeline):
                 start=1,
         ):
             image_id = str(group_image_index).zfill(4)
-            timestamp = time.strftime("%Y%m%dT%H%M%SZ")
+            timestamp = time.strftime("%Y%m%dT%H%M%SZ") if time is not None else None
             output_filename = (
                 f"{output_info['platform_id']}_{output_info['survey_id']}_"
                 f"{output_info['deployment_number']}_{timestamp}_{image_id}.JPG"
             )
 
             navigation_row = self._create_navigation_row(
-                output_filename, output_info, time, lat, long,
-                image_id, group, column_mapping,
+                output_filename,
+                output_info,
+                image_id,
+                group,
+                column_mapping,
+                time,
+                lat,
+                long,
             )
             navigation_df = pd.concat([navigation_df, pd.DataFrame([navigation_row])], ignore_index=True)
 
@@ -352,25 +367,30 @@ class ImageRescuePipeline(BasePipeline):
     def _create_navigation_row(
             self,
             output_filename: str,
-            output_info: dict,
-            time: datetime,
-            lat: float,
-            long: float,
+            output_info: dict[str, Any],
             image_id: str,
             group: pd.DataFrame,
-            column_mapping: dict,
-    ) -> dict:
+            column_mapping: dict[str, Any],
+            time: datetime | None = None,
+            lat: float | None = None,
+            long: float | None = None,
+    ) -> dict[str, Any]:
         """Create a navigation data row for an image."""
         navigation_row = {
             "filename": output_filename,
             "platform_id": output_info["platform_id"],
             "survey_id": output_info["survey_id"],
             "deployment_number": output_info["deployment_number"],
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S.%f"),
             "image_id": image_id,
-            "latitude": lat,
-            "longitude": long,
         }
+
+        # Add optional navigation data only if present
+        if time is not None:
+            navigation_row["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S.%f")
+        if lat is not None:
+            navigation_row["latitude"] = lat
+        if long is not None:
+            navigation_row["longitude"] = long
 
         # Add mapped columns
         for col, mapped_col in column_mapping.items():
@@ -407,7 +427,7 @@ class ImageRescuePipeline(BasePipeline):
             self,
             renamed_stills_list: list[Path],
             navigation_df: pd.DataFrame,
-            output_info: dict,
+            output_info: dict[str, Any],
     ) -> None:
         """Create navigation data file and generate thumbnails."""
         # Save navigation data
@@ -432,7 +452,7 @@ class ImageRescuePipeline(BasePipeline):
         image.create_grid_image(thumbnail_list, thumbnail_overview_path)
         self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
 
-    def _log_processing_details(self, output_info: dict, geo_time_info: dict) -> None:
+    def _log_processing_details(self, output_info: dict[str, Any], geo_time_info: dict[str, Any]) -> None:
         """Log processing details for debugging."""
         self.logger.debug(
             f"Survey ID: {output_info['survey_id']}, "
@@ -443,7 +463,7 @@ class ImageRescuePipeline(BasePipeline):
             f"Time: ({geo_time_info['start_time']}, {geo_time_info['end_time']})",
         )
 
-    def _cleanup_empty_folders(self, processed_folders: set) -> None:
+    def _cleanup_empty_folders(self, processed_folders: set[Path]) -> None:
         """Remove empty folders after processing."""
         for folder in processed_folders:
             if not any(folder.iterdir()):
@@ -689,8 +709,8 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def move_and_rotate_image(
-            src_path: str,
-            dest_path: str,
+            src_path: Path,
+            dest_path: Path,
             rotation_flag: int,
     ) -> None:
         """
@@ -714,7 +734,7 @@ class ImageRescuePipeline(BasePipeline):
             processed_img.save(dest_path, quality=100, exif=exif_bytes)
 
         # Delete the original image
-        Path.unlink(src_path)
+        Path(src_path).unlink()
 
     @staticmethod
     def interpolate_points(
@@ -744,9 +764,10 @@ class ImageRescuePipeline(BasePipeline):
         lats, longs, times = [], [], []
 
         # Check for availability and data types before coordinate interpolation
-        if all(pd.notna(val) for val in [start_lat, end_lat, start_long, end_long]):
-            lats = np.linspace(float(start_lat), float(end_lat), n_points).tolist()
-            longs = np.linspace(float(start_long), float(end_long), n_points).tolist()
+        if (isinstance(start_lat, float) and isinstance(end_lat, float)
+                and isinstance(start_long, float) and isinstance(end_long, float)):
+            lats = np.linspace(start_lat, end_lat, n_points).tolist()
+            longs = np.linspace(start_long, end_long, n_points).tolist()
         # If unavailable, use start_lat and start_long for all points if they are valid
         elif (
                 pd.notna(start_lat)

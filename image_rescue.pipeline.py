@@ -29,7 +29,7 @@ from marimba.core.pipeline import BasePipeline
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
-from marimba.marimba import __version__
+from marimba.main import __version__
 
 
 class ImageRescuePipeline(BasePipeline):
@@ -82,6 +82,32 @@ class ImageRescuePipeline(BasePipeline):
                 self.logger.debug(f"Copied {file.resolve().absolute()} -> {destination_path}")
             except Exception as e:
                 self.logger.error(f"Failed to copy {file.resolve().absolute()}: {e}")
+
+    def create_navigation_df(self) -> pd.DataFrame:
+        """Create an empty navigation DataFrame with proper dtypes."""
+        return pd.DataFrame({
+            'filename': pd.Series(dtype='str'),
+            'platform_id': pd.Series(dtype='str'),
+            'survey_id': pd.Series(dtype='str'),
+            'deployment_number': pd.Series(dtype='str'),
+            'timestamp': pd.Series(dtype='str'),
+            'image_id': pd.Series(dtype='str'),
+            'project': pd.Series(dtype='str'),
+            'latitude': pd.Series(dtype='float64'),
+            'longitude': pd.Series(dtype='float64'),
+            'videolab_inventory': pd.Series(dtype='str'),
+            'platform_deployment': pd.Series(dtype='str'),
+            'platform_name': pd.Series(dtype='str'),
+            'area_name': pd.Series(dtype='str'),
+            'transect_name': pd.Series(dtype='str'),
+            'approx_depth_range_in_metres': pd.Series(dtype='str'),
+            'notes': pd.Series(dtype='str'),
+            'survey_pi': pd.Series(dtype='str'),
+            'orcid': pd.Series(dtype='str'),
+            'image_context': pd.Series(dtype='str'),
+            'abstract': pd.Series(dtype='str'),
+            'view_port': pd.Series(dtype='str')
+        })
 
     def _process(self, data_dir: Path, config: Dict[str, Any], **kwargs: dict):
         # Copy CSV files to data directory and load into dataframes
@@ -240,7 +266,8 @@ class ImageRescuePipeline(BasePipeline):
                         else:
                             navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
 
-                navigation_df = pd.concat([navigation_df, pd.DataFrame([navigation_row])], ignore_index=True)
+                # Initialize empty navigation DataFrame with proper dtypes
+                navigation_df = self.create_navigation_df()
 
                 input_file_path = camera_roll_path / jpg_file
                 output_file_path = output_stills_directory / output_filename
@@ -268,7 +295,7 @@ class ImageRescuePipeline(BasePipeline):
                 )
 
                 # Create an overview image from the generated thumbnails
-                thumbnail_overview_path = output_base_directory / "OVERVIEW.JPG"
+                thumbnail_overview_path = output_base_directory / "overview.jpg"
                 image.create_grid_image(thumbnail_list, thumbnail_overview_path)
                 self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
 
@@ -450,7 +477,7 @@ class ImageRescuePipeline(BasePipeline):
             # Create a dataset summary for each of these
             dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
             dataset_wrapper.dry_run = False
-            dataset_wrapper.summary_name = "SUMMARY.MD"
+            dataset_wrapper.summary_name = f"{Path(directory).name}.summary.md"
             dataset_wrapper.generate_dataset_summary(subset_data_mapping, progress=False)
 
             # Add the summary to the dataset mapping
@@ -468,7 +495,7 @@ class ImageRescuePipeline(BasePipeline):
             # Create a iFDO for each of these
             dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
             dataset_wrapper.dry_run = False
-            dataset_wrapper.metadata_name = "IFDO.YML"
+            dataset_wrapper.metadata_name = f"{Path(directory).name}.ifdo.yml"
             dataset_wrapper.generate_ifdo(directory, subset_data_mapping, progress=False)
 
             # Add the iFDO to the dataset mapping

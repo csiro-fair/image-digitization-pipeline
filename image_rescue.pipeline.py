@@ -1,5 +1,6 @@
 """Marimba Pipeline for the CSIRO Image Rescue project."""  # noqa: N999
-
+import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import copy2
@@ -27,6 +28,7 @@ from ifdo.models import (
 from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
+from marimba.core.utils.constants import Operation
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
@@ -77,7 +79,7 @@ class ImageRescuePipeline(BasePipeline):
             data_dir: Path,
             source_path: Path,
             config: dict[str, Any],
-            **kwargs: dict[str, Any],  # noqa: ARG002
+            **kwargs: dict[str, Any],
     ) -> None:
         self.logger.info(f"Importing data from {source_path} to {data_dir}")
 
@@ -92,6 +94,8 @@ class ImageRescuePipeline(BasePipeline):
             return
 
         files_to_copy = [source_file for source_file in source_path.glob("**/*.jpg") if source_file.is_file()]
+        operation = kwargs.get("operation", "link")
+        operation_value = Operation(operation["_value_"]) if isinstance(operation, dict) else Operation(operation)
 
         try:
             for file in files_to_copy:
@@ -100,10 +104,20 @@ class ImageRescuePipeline(BasePipeline):
 
                 try:
                     if not self.dry_run:
-                        copy2(file, destination_path)
-                    self.logger.debug(f"Copied {file.resolve().absolute()} -> {destination_path}")
-                except OSError as e:
-                    self.logger.exception(f"Failed to copy {file.resolve().absolute()}: {e}")
+                        if operation_value == Operation.move:
+                            self.logger.debug(f"Moving file: {file} -> {destination_path}")
+                            shutil.move(str(file), str(destination_path))
+                        elif operation_value == Operation.copy:
+                            self.logger.debug(f"Copying file: {file} -> {destination_path}")
+                            shutil.copy2(str(file), str(destination_path))
+                        elif operation_value == Operation.link:
+                            self.logger.debug(f"Creating hard link: {file} -> {destination_path}")
+                            os.link(str(file), str(destination_path))
+                        else:
+                            self.logger.error(f"Invalid operation type: {operation_value}")
+                            self._handle_operation_error(operation_value)
+                except Exception as e:
+                    self.logger.exception(f"Failed to {operation_value} file {file} to {destination_path}: {e!s}")
                     # Continue with next file instead of stopping entire process
                     continue
 

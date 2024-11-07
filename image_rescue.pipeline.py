@@ -61,15 +61,15 @@ class ImageRescuePipeline(BasePipeline):
         return {
             "batch_id": "1a",
             "batch_data_path": (
-                "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/"
+                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
                 "WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv"
             ),
             "inventory_data_path": (
-                "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/"
+                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
                 "WP8_DataRescue/FilmRescue/Film-Inventory_2023.xlsx"
             ),
             "import_path": (
-                "/datasets/work/oa-biaa-team/work/FAIR_for_imagery/"
+                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
                 "WP8_DataRescue/FilmRescue/FilmRescue_batch1a/"
             ),
         }

@@ -59,19 +59,9 @@ class ImageRescuePipeline(BasePipeline):
             dict: Configuration parameters for the collection
         """
         return {
-            "batch_id": "1a",
-            "batch_data_path": (
-                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
-                "WP8_DataRescue/FilmRescue/0823_FilmRescue_batch1a.csv"
-            ),
-            "inventory_data_path": (
-                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
-                "WP8_DataRescue/FilmRescue/Film-Inventory_2023.xlsx"
-            ),
-            "import_path": (
-                "/datasets/oa-biaa-team/work/FAIR_for_imagery/"
-                "WP8_DataRescue/FilmRescue/FilmRescue_batch1a/"
-            ),
+            "batch_data_path": "",
+            "inventory_data_path": "",
+            "import_path": "",
         }
 
     def _import(
@@ -413,13 +403,14 @@ class ImageRescuePipeline(BasePipeline):
 
         # Process depth information
         depth = group.iloc[0]["Depth approx range (m)"]
-        if depth:
-            depth_split = depth.split("-")
-            if len(depth_split) > 1:
+        if pd.notna(depth) and depth:
+            if "-" in str(depth):
+                depth_split = depth.split("-")
                 navigation_row["approx_depth_range_in_metres"] = f"{min(depth_split)}-{max(depth_split)}"
-            else:
+            else:  # Single value
                 navigation_row["approx_depth_range_in_metres"] = f"{depth}-{depth}"
-
+        else:
+            navigation_row["approx_depth_range_in_metres"] = None
         return navigation_row
 
     def _process_single_image(

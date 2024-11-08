@@ -159,6 +159,16 @@ class ImageRescuePipeline(BasePipeline):
         # Process each survey station group
         for name, group in grouped:
             self.logger.debug(f"Processing group: {name}")
+
+            # Check if this group name contains SS199701
+            if "SS199701" in str(name):
+                # Get the directory path for this group
+                group_dir = data_dir / str(name)
+                if group_dir.exists():
+                    shutil.rmtree(group_dir)
+                    self.logger.debug(f"Deleted directory for group: {name}")
+                continue  # Skip processing this group
+
             self._process_survey_station(data_dir, group, processed_folders)
 
         # Clean up empty processed folders

@@ -10,6 +10,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import piexif
+from PIL import Image
 from ifdo.models import (
     CameraHousingViewport,
     ImageAcquisition,
@@ -25,7 +26,6 @@ from ifdo.models import (
     ImageQuality,
     ImageSpectralResolution,
 )
-from PIL import Image
 
 from marimba.core.pipeline import BasePipeline
 from marimba.core.utils.constants import Operation
@@ -65,11 +65,11 @@ class ImageRescuePipeline(BasePipeline):
         }
 
     def _import(
-            self,
-            data_dir: Path,
-            source_path: Path,
-            config: dict[str, Any],
-            **kwargs: dict[str, Any],
+        self,
+        data_dir: Path,
+        source_path: Path,
+        config: dict[str, Any],
+        **kwargs: dict[str, Any],
     ) -> None:
         self.logger.info(f"Importing data from {source_path} to {data_dir}")
 
@@ -143,10 +143,10 @@ class ImageRescuePipeline(BasePipeline):
         })
 
     def _process(
-            self,
-            data_dir: Path,
-            config: dict[str, Any],
-            **kwargs: dict[str, Any],  # noqa: ARG002
+        self,
+        data_dir: Path,
+        config: dict[str, Any],
+        **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> None:
         # Load and prepare data
         batch_data_df, inventory_df = self._load_input_data(data_dir, config)
@@ -212,10 +212,10 @@ class ImageRescuePipeline(BasePipeline):
         )
 
     def _collect_image_files(
-            self,
-            data_dir: Path,
-            group: pd.DataFrame,
-            processed_folders: set[Path],
+        self,
+        data_dir: Path,
+        group: pd.DataFrame,
+        processed_folders: set[Path],
     ) -> list[tuple[Path, int]]:
         """Collect all image files for a survey station."""
         group_jpg_files = []
@@ -260,7 +260,13 @@ class ImageRescuePipeline(BasePipeline):
         end_lat, end_long = group.iloc[0]["end_lat"], group.iloc[0]["end_long"]
         start_time = group.iloc[0]["Starte date/time"]
         end_time = group.iloc[0]["End Date/time"]
-        utc_offset = group.iloc[0]["UTC offset"] or 10
+
+        # Handle NaN value for UTC offset with a default value
+        utc_offset = group.iloc[0]["UTC offset"]
+        if pd.isna(utc_offset):
+            utc_offset = 10
+        else:
+            utc_offset = float(utc_offset)
 
         # Adjust timestamps for UTC offset
         offset = timedelta(hours=utc_offset)
@@ -279,11 +285,11 @@ class ImageRescuePipeline(BasePipeline):
         }
 
     def _process_images_and_navigation(
-            self,
-            group_jpg_files: list[tuple[Path, int]],
-            output_info: dict[str, Any],
-            geo_time_info: dict[str, Any],
-            group: pd.DataFrame,
+        self,
+        group_jpg_files: list[tuple[Path, int]],
+        output_info: dict[str, Any],
+        geo_time_info: dict[str, Any],
+        group: pd.DataFrame,
     ) -> None:
         """Process images and create navigation data for a survey station."""
         n_points = len(group_jpg_files)
@@ -309,19 +315,19 @@ class ImageRescuePipeline(BasePipeline):
             self._create_output_files(renamed_stills_list, navigation_df, output_info)
 
     def _process_image_files(
-            self,
-            group_jpg_files: list[tuple[Path, int]],
-            interpolated_points: list[tuple[float | None, float | None, pd.Timestamp | None]],
-            output_info: dict[str, Any],
-            group: pd.DataFrame,
+        self,
+        group_jpg_files: list[tuple[Path, int]],
+        interpolated_points: list[tuple[float | None, float | None, pd.Timestamp | None]],
+        output_info: dict[str, Any],
+        group: pd.DataFrame,
     ) -> pd.DataFrame:
         """Process individual image files and create navigation data."""
         navigation_df = self.create_navigation_df()
         column_mapping = self._get_column_mapping()
 
         for group_image_index, ((jpg_file, rotation), (lat, long, time)) in enumerate(
-                zip(group_jpg_files, interpolated_points, strict=False),
-                start=1,
+            zip(group_jpg_files, interpolated_points, strict=False),
+            start=1,
         ):
             image_id = str(group_image_index).zfill(4)
             timestamp = time.strftime("%Y%m%dT%H%M%SZ") if time is not None else None
@@ -369,15 +375,15 @@ class ImageRescuePipeline(BasePipeline):
         }
 
     def _create_navigation_row(
-            self,
-            output_filename: str,
-            output_info: dict[str, Any],
-            image_id: str,
-            group: pd.DataFrame,
-            column_mapping: dict[str, Any],
-            time: datetime | None = None,
-            lat: float | None = None,
-            long: float | None = None,
+        self,
+        output_filename: str,
+        output_info: dict[str, Any],
+        image_id: str,
+        group: pd.DataFrame,
+        column_mapping: dict[str, Any],
+        time: datetime | None = None,
+        lat: float | None = None,
+        long: float | None = None,
     ) -> dict[str, Any]:
         """Create a navigation data row for an image."""
         navigation_row = {
@@ -414,11 +420,11 @@ class ImageRescuePipeline(BasePipeline):
         return navigation_row
 
     def _process_single_image(
-            self,
-            jpg_file: Path,
-            output_filename: str,
-            rotation: int,
-            output_stills_dir: Path,
+        self,
+        jpg_file: Path,
+        output_filename: str,
+        rotation: int,
+        output_stills_dir: Path,
     ) -> None:
         """Process a single image file."""
         output_file_path = output_stills_dir / output_filename
@@ -429,16 +435,16 @@ class ImageRescuePipeline(BasePipeline):
             self.logger.debug(f"Processed image {jpg_file} -> {output_filename}")
 
     def _create_output_files(
-            self,
-            renamed_stills_list: list[Path],
-            navigation_df: pd.DataFrame,
-            output_info: dict[str, Any],
+        self,
+        renamed_stills_list: list[Path],
+        navigation_df: pd.DataFrame,
+        output_info: dict[str, Any],
     ) -> None:
         """Create navigation data file and generate thumbnails."""
         # Save navigation data
         navigation_data_path = (
-                output_info["data_dir"] /
-                f"{output_info['platform_id']}_{output_info['survey_id']}_{output_info['deployment_number']}.CSV"
+            output_info["data_dir"] /
+            f"{output_info['platform_id']}_{output_info['survey_id']}_{output_info['deployment_number']}.CSV"
         )
         if not navigation_data_path.parent.exists():
             navigation_data_path.parent.mkdir(parents=True)
@@ -455,7 +461,7 @@ class ImageRescuePipeline(BasePipeline):
 
         thumbnail_overview_path = output_info["base_dir"] / "overview.jpg"
         image.create_grid_image(thumbnail_list, thumbnail_overview_path)
-        self.logger.debug(f"Generated overview thumbnail at {thumbnail_overview_path}")
+        self.logger.debug(f"Generated thumbnail overview image at {thumbnail_overview_path}")
 
     def _log_processing_details(self, output_info: dict[str, Any], geo_time_info: dict[str, Any]) -> None:
         """Log processing details for debugging."""
@@ -477,8 +483,8 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def _generate_summaries(
-            data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]],
-            data_dir: Path,
+        data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]],
+        data_dir: Path,
     ) -> None:
 
         # Generate data summaries at the voyage and platform levels, and an iFDO at the deployment level
@@ -542,10 +548,10 @@ class ImageRescuePipeline(BasePipeline):
             data_mapping[dataset_wrapper.metadata_path] = output_file_path, None, None
 
     def _package(
-            self,
-            data_dir: Path,
-            config: dict[str, Any],  # noqa: ARG002
-            **kwargs: dict[str, Any],  # noqa: ARG002
+        self,
+        data_dir: Path,
+        config: dict[str, Any],  # noqa: ARG002
+        **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> dict[Path, tuple[Path, ImageData | None, dict[str, Any] | None]]:
         data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]] = {}
 
@@ -572,10 +578,10 @@ class ImageRescuePipeline(BasePipeline):
                 output_file_path = file_path.relative_to(data_dir)
 
                 if (
-                        file_path.is_file()
-                        and file_path.suffix.lower() in [".jpg"]
-                        and "_THUMB" not in file_path.name
-                        and "overview" not in file_path.name
+                    file_path.is_file()
+                    and file_path.suffix.lower() in [".jpg"]
+                    and "_THUMB" not in file_path.name
+                    and "overview" not in file_path.name
                 ):
                     # Set the image creators
                     image_creators = [
@@ -689,9 +695,9 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def copy_and_rotate_image(
-            src_path: str,
-            dest_path: str,
-            rotation_flag: int,
+        src_path: str,
+        dest_path: str,
+        rotation_flag: int,
     ) -> None:
         """
         Copy and rotate an image.
@@ -714,9 +720,9 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def move_and_rotate_image(
-            src_path: Path,
-            dest_path: Path,
-            rotation_flag: int,
+        src_path: Path,
+        dest_path: Path,
+        rotation_flag: int,
     ) -> None:
         """
         Move and rotate an image.
@@ -743,13 +749,13 @@ class ImageRescuePipeline(BasePipeline):
 
     @staticmethod
     def interpolate_points(
-            start_lat: float | None,
-            start_long: float | None,
-            end_lat: float | None,
-            end_long: float | None,
-            start_time: str | pd.Timestamp | None,
-            end_time: str | pd.Timestamp | None,
-            n_points: int,
+        start_lat: float | None,
+        start_long: float | None,
+        end_lat: float | None,
+        end_long: float | None,
+        start_time: str | pd.Timestamp | None,
+        end_time: str | pd.Timestamp | None,
+        n_points: int,
     ) -> list[tuple[float | None, float | None, pd.Timestamp | None]]:
         """
         Interpolate geographic coordinates and timestamps between start and end points.
@@ -770,15 +776,15 @@ class ImageRescuePipeline(BasePipeline):
 
         # Check for availability and data types before coordinate interpolation
         if (isinstance(start_lat, float) and isinstance(end_lat, float)
-                and isinstance(start_long, float) and isinstance(end_long, float)):
+            and isinstance(start_long, float) and isinstance(end_long, float)):
             lats = np.linspace(start_lat, end_lat, n_points).tolist()
             longs = np.linspace(start_long, end_long, n_points).tolist()
         # If unavailable, use start_lat and start_long for all points if they are valid
         elif (
-                pd.notna(start_lat)
-                and pd.notna(start_long)
-                and isinstance(start_lat, int | float)
-                and isinstance(start_long, int | float)
+            pd.notna(start_lat)
+            and pd.notna(start_long)
+            and isinstance(start_lat, int | float)
+            and isinstance(start_long, int | float)
         ):
             lats = [start_lat] * n_points
             longs = [start_long] * n_points

@@ -162,11 +162,12 @@ class ImageRescuePipeline(BasePipeline):
 
             # Check if this group name contains SS199701
             if "SS199701" in str(name):
-                # Get the directory path for this group
-                group_dir = data_dir / str(name)
-                if group_dir.exists():
-                    shutil.rmtree(group_dir)
-                    self.logger.debug(f"Deleted directory for group: {name}")
+                # Delete each folder associated with this group
+                for _index, row in group.iterrows():
+                    folder_path = data_dir / str(row["folder_name"]).zfill(8)
+                    if folder_path.exists():
+                        shutil.rmtree(folder_path)
+                        self.logger.debug(f"Deleted directory: {folder_path}")
                 continue  # Skip processing this group
 
             self._process_survey_station(data_dir, group, processed_folders)

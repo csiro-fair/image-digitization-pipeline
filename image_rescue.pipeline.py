@@ -25,6 +25,8 @@ from ifdo.models import (
     ImagePixelMagnitude,
     ImageQuality,
     ImageSpectralResolution,
+    Context,
+    License,
 )
 
 from marimba.core.pipeline import BasePipeline
@@ -85,7 +87,6 @@ class ImageRescuePipeline(BasePipeline):
 
         files_to_copy = [source_file for source_file in source_path.glob("**/*.jpg") if source_file.is_file()]
         operation = kwargs.get("operation", "link")
-        operation_value = Operation(operation["_value_"]) if isinstance(operation, dict) else Operation(operation)
 
         try:
             for file in files_to_copy:
@@ -94,20 +95,19 @@ class ImageRescuePipeline(BasePipeline):
 
                 try:
                     if not self.dry_run:
-                        if operation_value == Operation.move:
+                        if operation == "move":
                             self.logger.debug(f"Moving file: {file} -> {destination_path}")
                             shutil.move(str(file), str(destination_path))
-                        elif operation_value == Operation.copy:
+                        elif operation == "copy":
                             self.logger.debug(f"Copying file: {file} -> {destination_path}")
                             shutil.copy2(str(file), str(destination_path))
-                        elif operation_value == Operation.link:
+                        elif operation == "link":
                             self.logger.debug(f"Creating hard link: {file} -> {destination_path}")
                             os.link(str(file), str(destination_path))
                         else:
-                            self.logger.error(f"Invalid operation type: {operation_value}")
-                            self._handle_operation_error(operation_value)
+                            self.logger.error(f"Invalid operation type: {operation}")
                 except Exception as e:
-                    self.logger.exception(f"Failed to {operation_value} file {file} to {destination_path}: {e!s}")
+                    self.logger.exception(f"Failed to {operation} file {file} to {destination_path}: {e!s}")
                     # Continue with next file instead of stopping entire process
                     continue
 
@@ -137,7 +137,8 @@ class ImageRescuePipeline(BasePipeline):
             "notes": pd.Series(dtype="str"),
             "survey_pi": pd.Series(dtype="str"),
             "orcid": pd.Series(dtype="str"),
-            "image_context": pd.Series(dtype="str"),
+            "image_context_name": pd.Series(dtype="str"),
+            "image_context_uri": pd.Series(dtype="str"),
             "abstract": pd.Series(dtype="str"),
             "view_port": pd.Series(dtype="str"),
         })
@@ -380,7 +381,8 @@ class ImageRescuePipeline(BasePipeline):
             "NOTE": "notes",
             "Survey_PI": "survey_pi",
             "orcid": "orcid",
-            "image-context": "image_context",
+            "Image-context-name": "image_context_name",
+            "Image-context-uri": "image_context_uri",
             "Abstract": "abstract",
             "View_Port": "view_port",
         }
@@ -612,12 +614,13 @@ class ImageRescuePipeline(BasePipeline):
 
                     image_pi = ImagePI(name=row["survey_pi"], orcid=row["orcid"])
 
-                    # "image_id",
-                    # "videolab_inventory",
-                    # "platform_deployment",
-                    # "area_name",
-                    # "transect_name",
-                    # "notes",
+                    # Create Context and License objects
+                    image_context = Context(name=str(row["image_context_name"]), uri=str(row["image_context_uri"]))
+                    image_project = Context(name=row["survey_id"])
+                    image_event = Context(name=f'{row["survey_id"]}_{row["deployment_number"]}')
+                    image_platform = Context(name=str(row["platform_name"]).strip())
+                    image_sensor = Context(name="Slidefilm Camera")
+                    image_license = License(name="CC BY 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
 
                     # ruff: noqa: ERA001
                     image_data = ImageData(
@@ -627,19 +630,19 @@ class ImageRescuePipeline(BasePipeline):
                         image_latitude=float(row["latitude"]),
                         image_longitude=float(row["longitude"]),
                         # Note: Leave image_altitude (singular number) empty
-                        image_altitude=None,
+                        image_altitude_meters=None,
                         image_coordinate_reference_system="EPSG:4326",
                         image_coordinate_uncertainty_meters=None,
-                        image_context=row["image_context"],
-                        image_project=row["survey_id"],
-                        image_event=f'{row["survey_id"]}_{row["deployment_number"]}',
-                        image_platform=str(row["platform_name"]).strip(),
-                        image_sensor="Slidefilm Camera",
+                        image_context=image_context,
+                        image_project=image_project,
+                        image_event=image_event,
+                        image_platform=image_platform,
+                        image_sensor=image_sensor,
                         image_uuid=str(uuid4()),
                         # image_hash_sha256=image_hash_sha256,
                         image_pi=image_pi,
                         image_creators=image_creators,
-                        image_license="CC BY 4.0",
+                        image_license=image_license,
                         image_copyright="CSIRO",
                         image_abstract=row["abstract"],
                         #
@@ -650,7 +653,7 @@ class ImageRescuePipeline(BasePipeline):
                         image_navigation=ImageNavigation.RECONSTRUCTED,
                         # image_scale_reference=ImageScaleReference.NONE,
                         image_illumination=ImageIllumination.ARTIFICIAL_LIGHT,
-                        image_pixel_mag=ImagePixelMagnitude.CM,
+                        image_pixel_magnitude=ImagePixelMagnitude.CM,
                         image_marine_zone=ImageMarineZone.SEAFLOOR,
                         image_spectral_resolution=ImageSpectralResolution.RGB,
                         image_capture_mode=ImageCaptureMode.MANUAL,

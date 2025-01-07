@@ -27,10 +27,12 @@ from ifdo.models import (
     ImageSpectralResolution,
     Context,
     License,
+    ImageCreator,
 )
 
+from marimba.core.schemas.base import BaseMetadata
+from marimba.core.schemas.ifdo import iFDOMetadata
 from marimba.core.pipeline import BasePipeline
-from marimba.core.utils.constants import Operation
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
@@ -41,6 +43,20 @@ class ImageRescuePipeline(BasePipeline):
     """
     Marimba image rescue pipeline.
     """
+
+    def __init__(
+        self,
+        root_path: str | Path,
+        config: dict[str, Any] | None = None,
+        *,
+        dry_run: bool = False,
+    ) -> None:
+        super().__init__(
+            root_path,
+            config,
+            dry_run=dry_run,
+            metadata_class=iFDOMetadata,
+        )
 
     @staticmethod
     def get_pipeline_config_schema() -> dict[str, Any]:
@@ -550,23 +566,27 @@ class ImageRescuePipeline(BasePipeline):
                 if str(relative_dst).startswith(directory) and image_data_list
             }
 
-            # Create a iFDO for each of these
-            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
-            dataset_wrapper.dry_run = False
-            dataset_wrapper.metadata_name = f"{Path(directory).name}.ifdo.yml"
-            dataset_wrapper.generate_ifdo(directory, subset_data_mapping, progress=False)
+            # Create a iFDO for this directory
+            metadata_name = f"{Path(directory).name}.ifdo.yml"
+            iFDOMetadata.create_dataset_metadata(
+                dataset_name=directory,
+                root_dir=data_dir / directory,
+                items=subset_data_mapping,
+                metadata_name=metadata_name
+            )
 
             # Add the iFDO to the dataset mapping
-            output_file_path = dataset_wrapper.metadata_path.relative_to(data_dir)
-            data_mapping[dataset_wrapper.metadata_path] = output_file_path, None, None
+            metadata_path = data_dir / directory / metadata_name
+            output_file_path = metadata_path.relative_to(data_dir)
+            data_mapping[metadata_path] = output_file_path, None, None
 
     def _package(
         self,
         data_dir: Path,
         config: dict[str, Any],  # noqa: ARG002
         **kwargs: dict[str, Any],  # noqa: ARG002
-    ) -> dict[Path, tuple[Path, ImageData | None, dict[str, Any] | None]]:
-        data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]] = {}
+    ) -> dict[Path, tuple[Path, BaseMetadata | None, dict[str, Any] | None]]:
+        data_mapping: dict[Path, tuple[Path, list[BaseMetadata] | None, dict[str, Any] | None]] = {}
 
         # List all files in the root directory recursively
         all_files = data_dir.glob("**/*")
@@ -596,13 +616,14 @@ class ImageRescuePipeline(BasePipeline):
                     and "_THUMB" not in file_path.name
                     and "overview" not in file_path.name
                 ):
-                    # Set the image creators
+                    # Set the image PI and creators
+                    image_pi = ImagePI(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}")
                     image_creators = [
-                        ImagePI(name="Chris Jackett", orcid="0000-0003-1132-1558"),
-                        ImagePI(name="Franzis Althaus", orcid="0000-0002-5336-4612"),
-                        ImagePI(name="Candice Untiedt", orcid="0000-0003-1562-3473"),
-                        ImagePI(name="David Webb", orcid="0000-0001-5847-7002"),
-                        # ImagePI(name="Nic Bax", orcid="0000-0002-9697-4963"),
+                        ImageCreator(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}"),
+                        ImageCreator(name="Chris Jackett", uri="https://orcid.org/0000-0003-1132-1558"),
+                        ImageCreator(name="Franzis Althaus", uri="https://orcid.org/0000-0002-5336-4612"),
+                        ImageCreator(name="Candice Untiedt", uri="https://orcid.org/0000-0003-1562-3473"),
+                        ImageCreator(name="David Webb", uri="https://orcid.org/0000-0001-5847-7002"),
                     ]
 
                     camera_housing_viewport = CameraHousingViewport(
@@ -611,8 +632,6 @@ class ImageRescuePipeline(BasePipeline):
                         viewport_thickness_millimeter=0.0,
                         viewport_extra_description=None,
                     )
-
-                    image_pi = ImagePI(name=row["survey_pi"], orcid=row["orcid"])
 
                     # Create Context and License objects
                     image_context = Context(name=str(row["image_context_name"]), uri=str(row["image_context_uri"]))
@@ -700,7 +719,8 @@ class ImageRescuePipeline(BasePipeline):
                         # image_annotations: Optional[List[ImageAnnotation]] = None,
                     )
 
-                    data_mapping[file_path] = output_file_path, [image_data], row.to_dict()
+                    metadata = self._metadata_class(image_data)
+                    data_mapping[file_path] = output_file_path, [metadata], row.to_dict()
 
         # Generate summaries and iFDOs
         self._generate_summaries(data_mapping, data_dir)

@@ -1,4 +1,4 @@
-"""Marimba Pipeline for the CSIRO Image Rescue project."""  # noqa: N999
+"""Marimba Pipeline for the CSIRO Image Rescue project."""  # noqa: INP001
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -10,29 +10,29 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import piexif
-from PIL import Image
 from ifdo.models import (
-    CameraHousingViewport,
     ImageAcquisition,
+    ImageCameraHousingViewport,
     ImageCaptureMode,
+    ImageContext,
+    ImageCreator,
     ImageData,
     ImageDeployment,
     ImageFaunaAttraction,
     ImageIllumination,
+    ImageLicense,
     ImageMarineZone,
     ImageNavigation,
     ImagePI,
     ImagePixelMagnitude,
     ImageQuality,
     ImageSpectralResolution,
-    Context,
-    License,
-    ImageCreator,
 )
+from PIL import Image
 
+from marimba.core.pipeline import BasePipeline
 from marimba.core.schemas.base import BaseMetadata
 from marimba.core.schemas.ifdo import iFDOMetadata
-from marimba.core.pipeline import BasePipeline
 from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
@@ -51,6 +51,16 @@ class ImageRescuePipeline(BasePipeline):
         *,
         dry_run: bool = False,
     ) -> None:
+        """
+        Initialize a new Pipeline instance.
+
+        Args:
+            root_path (str | Path): Base directory path where the pipeline will store its data and configuration files.
+            config (dict[str, Any] | None, optional): Pipeline configuration dictionary. If None, default configuration
+             will be used. Defaults to None.
+            dry_run (bool, optional): If True, prevents any filesystem modifications. Useful for validation and testing.
+             Defaults to False.
+        """
         super().__init__(
             root_path,
             config,
@@ -291,10 +301,7 @@ class ImageRescuePipeline(BasePipeline):
 
         # Handle NaN value for UTC offset with a default value
         utc_offset = group.iloc[0]["UTC offset"]
-        if pd.isna(utc_offset):
-            utc_offset = 10
-        else:
-            utc_offset = float(utc_offset)
+        utc_offset = 10 if pd.isna(utc_offset) else float(utc_offset)
 
         # Adjust timestamps for UTC offset
         offset = timedelta(hours=utc_offset)
@@ -572,7 +579,7 @@ class ImageRescuePipeline(BasePipeline):
                 dataset_name=directory,
                 root_dir=data_dir / directory,
                 items=subset_data_mapping,
-                metadata_name=metadata_name
+                metadata_name=metadata_name,
             )
 
             # Add the iFDO to the dataset mapping
@@ -585,7 +592,7 @@ class ImageRescuePipeline(BasePipeline):
         data_dir: Path,
         config: dict[str, Any],  # noqa: ARG002
         **kwargs: dict[str, Any],  # noqa: ARG002
-    ) -> dict[Path, tuple[Path, BaseMetadata | None, dict[str, Any] | None]]:
+    ) -> dict[Path, tuple[Path, list[BaseMetadata] | None, dict[str, Any] | None]]:
         data_mapping: dict[Path, tuple[Path, list[BaseMetadata] | None, dict[str, Any] | None]] = {}
 
         # List all files in the root directory recursively
@@ -626,20 +633,20 @@ class ImageRescuePipeline(BasePipeline):
                         ImageCreator(name="David Webb", uri="https://orcid.org/0000-0001-5847-7002"),
                     ]
 
-                    camera_housing_viewport = CameraHousingViewport(
+                    camera_housing_viewport = ImageCameraHousingViewport(
                         viewport_type=row["view_port"],
                         viewport_optical_density=0.0,
                         viewport_thickness_millimeter=0.0,
                         viewport_extra_description=None,
                     )
 
-                    # Create Context and License objects
-                    image_context = Context(name=str(row["image_context_name"]), uri=str(row["image_context_uri"]))
-                    image_project = Context(name=row["survey_id"])
-                    image_event = Context(name=f'{row["survey_id"]}_{row["deployment_number"]}')
-                    image_platform = Context(name=str(row["platform_name"]).strip())
-                    image_sensor = Context(name="Slidefilm Camera")
-                    image_license = License(name="CC BY 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
+                    # Create ImageContext and ImageLicense objects
+                    image_context = ImageContext(name=str(row["image_context_name"]), uri=str(row["image_context_uri"]))
+                    image_project = ImageContext(name=row["survey_id"])
+                    image_event = ImageContext(name=f'{row["survey_id"]}_{row["deployment_number"]}')
+                    image_platform = ImageContext(name=str(row["platform_name"]).strip())
+                    image_sensor = ImageContext(name="Slidefilm Camera")
+                    image_license = ImageLicense(name="CC BY 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
 
                     # ruff: noqa: ERA001
                     image_data = ImageData(
@@ -685,12 +692,12 @@ class ImageRescuePipeline(BasePipeline):
                         # image_camera_roll_degrees: Optional[float] = None,
                         image_overlap_fraction=0,
                         image_datetime_format="%Y-%m-%d %H:%M:%S.%f",
-                        # image_camera_pose: Optional[CameraPose] = None,
+                        # image_camera_pose: Optional[ImageCameraPose] = None,
                         image_camera_housing_viewport=camera_housing_viewport,
-                        # image_flatport_parameters: Optional[FlatportParameters] = None,
-                        # image_domeport_parameters: Optional[DomeportParameters] = None,
-                        # image_camera_calibration_model: Optional[CameraCalibrationModel] = None,
-                        # image_photometric_calibration: Optional[PhotometricCalibration] = None,
+                        # image_flatport_parameters: Optional[ImageFlatportParameters] = None,
+                        # image_domeport_parameters: Optional[ImageDomeportParameters] = None,
+                        # image_camera_calibration_model: Optional[ImageCameraCalibrationModel] = None,
+                        # image_photometric_calibration: Optional[ImagePhotometricCalibration] = None,
                         # image_objective: Optional[str] = None
                         image_target_environment="Benthic habitat",
                         # image_target_timescale: Optional[str] = None,

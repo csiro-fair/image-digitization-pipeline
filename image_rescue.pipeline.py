@@ -1,4 +1,4 @@
-"""Marimba Pipeline for the CSIRO Image Rescue project."""  # noqa: INP001
+"""Marimba Pipeline for the CSIRO Image Digitization project."""  # noqa: INP001
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -39,9 +39,25 @@ from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
 from marimba.main import __version__
 
 
-class ImageRescuePipeline(BasePipeline):
+class ImageDigitizationPipeline(BasePipeline):
     """
-    Marimba image rescue pipeline.
+    Marimba Pipeline for the CSIRO Image Digitization project.
+
+    This class extends the BasePipeline to provide specific functionality for processing and digitizing image data from
+    the CSIRO Image Digitization project. It handles importing, processing, and packaging of image files along with
+    associated metadata and navigation information.
+
+    Methods:
+        __init__: Initialize the ImageDigitizationPipeline instance.
+        get_pipeline_config_schema: Get the pipeline configuration schema.
+        get_collection_config_schema: Get the collection configuration schema.
+        _import: Import data from source to destination directory.
+        create_navigation_df: Create an empty navigation DataFrame with proper dtypes.
+        _process: Process the imported data, including image files and navigation information.
+        _package: Package the processed data and generate necessary metadata files.
+        copy_and_rotate_image: Copy and rotate an image file.
+        move_and_rotate_image: Move and rotate an image file.
+        interpolate_points: Interpolate geographic coordinates and timestamps between start and end points.
     """
 
     def __init__(
@@ -71,7 +87,7 @@ class ImageRescuePipeline(BasePipeline):
     @staticmethod
     def get_pipeline_config_schema() -> dict[str, Any]:
         """
-        Get the pipeline configuration schema for the Image Rescue Pipeline.
+        Get the pipeline configuration schema for the Image Digitization Pipeline.
 
         Returns:
             dict: Configuration parameters for the pipeline
@@ -81,7 +97,7 @@ class ImageRescuePipeline(BasePipeline):
     @staticmethod
     def get_collection_config_schema() -> dict[str, Any]:
         """
-        Get the collection configuration schema for the Image Rescue Pipeline.
+        Get the collection configuration schema for the Image Digitization Pipeline.
 
         Returns:
             dict: Configuration parameters for the collection

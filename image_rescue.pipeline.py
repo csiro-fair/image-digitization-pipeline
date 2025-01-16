@@ -646,7 +646,7 @@ class ImageRescuePipeline(BasePipeline):
                     image_event = ImageContext(name=f'{row["survey_id"]}_{row["deployment_number"]}')
                     image_platform = ImageContext(name=str(row["platform_name"]).strip())
                     image_sensor = ImageContext(name="Slidefilm Camera")
-                    image_license = ImageLicense(name="CC BY 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
+                    image_license = ImageLicense(name="CC BY-NC 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
 
                     # ruff: noqa: ERA001
                     image_data = ImageData(
@@ -665,13 +665,12 @@ class ImageRescuePipeline(BasePipeline):
                         image_platform=image_platform,
                         image_sensor=image_sensor,
                         image_uuid=str(uuid4()),
-                        # image_hash_sha256=image_hash_sha256,
                         image_pi=image_pi,
                         image_creators=image_creators,
                         image_license=image_license,
                         image_copyright="CSIRO",
                         image_abstract=row["abstract"],
-                        #
+
                         # # iFDO capture (optional)
                         image_acquisition=ImageAcquisition.SLIDE,
                         image_quality=ImageQuality.PRODUCT,
@@ -707,7 +706,7 @@ class ImageRescuePipeline(BasePipeline):
                         image_item_identification_scheme="<platform_id>_<survey_id>_<deployment_number>_<datetimestamp>_<image_id>.<ext>",
                         image_curation_protocol=f"Slide-film scanned; "
                                                 f"digitised images processed with Marimba v{__version__}",
-                        #
+
                         # # iFDO content (optional)
                         # Note: Marimba automatically calculates injects image_entropy and image_average_color
                         # during packaging

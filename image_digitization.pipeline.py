@@ -56,7 +56,6 @@ class ImageDigitizationPipeline(BasePipeline):
         _process: Process the imported data, including image files and navigation information.
         _package: Package the processed data and generate necessary metadata files.
         copy_and_rotate_image: Copy and rotate an image file.
-        move_and_rotate_image: Move and rotate an image file.
         interpolate_points: Interpolate geographic coordinates and timestamps between start and end points.
     """
 
@@ -483,7 +482,7 @@ class ImageDigitizationPipeline(BasePipeline):
 
         if not output_file_path.exists():
             output_stills_dir.mkdir(parents=True, exist_ok=True)
-            self.move_and_rotate_image(jpg_file, output_file_path, rotation)
+            self.copy_and_rotate_image(jpg_file, output_file_path, rotation)
             self.logger.debug(f"Processed image {jpg_file} -> {output_filename}")
 
     def _create_output_files(
@@ -669,8 +668,8 @@ class ImageDigitizationPipeline(BasePipeline):
                         # iFDO core
                         image_datetime=datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S.%f")
                         .replace(tzinfo=timezone.utc),
-                        image_latitude=float(row["latitude"]),
-                        image_longitude=float(row["longitude"]),
+                        image_latitude=float(row["latitude"]) if pd.notna(row["latitude"]) else None,
+                        image_longitude=float(row["longitude"]) if pd.notna(row["longitude"]) else None,
                         # Note: Leave image_altitude (singular number) empty
                         image_altitude_meters=None,
                         image_coordinate_reference_system="EPSG:4326",
@@ -751,37 +750,12 @@ class ImageDigitizationPipeline(BasePipeline):
 
     @staticmethod
     def copy_and_rotate_image(
-        src_path: str,
-        dest_path: str,
-        rotation_flag: int,
-    ) -> None:
-        """
-        Copy and rotate an image.
-
-        Args:
-            src_path: Source path of the image file
-            dest_path: Destination path for the processed image
-            rotation_flag: Flag indicating rotation (1 for 180 degrees, 0 for no rotation)
-
-        Returns:
-            None
-        """
-        # Open the image with PIL
-        with Image.open(src_path) as original_img:
-            processed_img = original_img.rotate(180) if rotation_flag == 1 else original_img
-
-            exif_dict = piexif.load(processed_img.info.get("exif", b""))
-            exif_bytes = piexif.dump(exif_dict)
-            processed_img.save(dest_path, quality=100, exif=exif_bytes)
-
-    @staticmethod
-    def move_and_rotate_image(
         src_path: Path,
         dest_path: Path,
         rotation_flag: int,
     ) -> None:
         """
-        Move and rotate an image.
+        Copy and rotate an image, preserving the original file.
 
         Args:
             src_path: Source path of the image file
@@ -791,17 +765,27 @@ class ImageDigitizationPipeline(BasePipeline):
         Returns:
             None
         """
-        # Open the image with PIL
-        with Image.open(src_path) as original_img:
-            # Create rotated image if needed, otherwise use original
-            processed_img = original_img.rotate(180) if rotation_flag == 1 else original_img
+        # First check if destination already exists
+        if dest_path.exists():
+            return
 
-            exif_dict = piexif.load(processed_img.info.get("exif", b""))
-            exif_bytes = piexif.dump(exif_dict)
-            processed_img.save(dest_path, quality=100, exif=exif_bytes)
+        try:
+            # Open the image with PIL
+            with Image.open(src_path) as original_img:
+                # Create rotated image if needed, otherwise use original
+                processed_img = original_img.rotate(180) if rotation_flag == 1 else original_img
 
-        # Delete the original image
-        Path(src_path).unlink()
+                exif_dict = piexif.load(processed_img.info.get("exif", b""))
+                exif_bytes = piexif.dump(exif_dict)
+                processed_img.save(dest_path, quality=100, exif=exif_bytes)
+
+        except FileNotFoundError as err:
+            raise FileNotFoundError(f"Source image not found: {src_path}") from err
+        except Exception:
+            # If anything goes wrong during processing, ensure destination is cleaned up
+            if dest_path.exists():
+                dest_path.unlink()
+            raise
 
     @staticmethod
     def interpolate_points(

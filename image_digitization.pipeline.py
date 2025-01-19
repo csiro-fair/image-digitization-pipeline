@@ -1,6 +1,7 @@
 """Marimba Pipeline for the CSIRO Image Digitization project."""  # noqa: INP001
 import os
 import shutil
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import copy2
@@ -214,9 +215,6 @@ class ImageDigitizationPipeline(BasePipeline):
 
             self._process_survey_station(data_dir, group, processed_folders)
 
-        # Clean up empty processed folders
-        self._cleanup_empty_folders(processed_folders)
-
     def _load_input_data(self, data_dir: Path, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Load and prepare input data from batch and inventory files."""
         # Get paths from config with type checking
@@ -257,12 +255,28 @@ class ImageDigitizationPipeline(BasePipeline):
         self._log_processing_details(output_info, geo_time_info)
 
         # Process images and create navigation data
-        self._process_images_and_navigation(
-            group_jpg_files,
-            output_info,
-            geo_time_info,
-            group,
-        )
+        try:
+            self._process_images_and_navigation(
+                group_jpg_files,
+                output_info,
+                geo_time_info,
+                group,
+            )
+
+            # After successful processing, clean up source directories
+            for jpg_file, _ in group_jpg_files:
+                with suppress(FileNotFoundError):
+                    jpg_file.unlink()  # Delete the source file
+
+            # Clean up empty source directories
+            for folder in processed_folders:
+                if folder.exists() and not any(folder.iterdir()):
+                    with suppress(OSError):
+                        folder.rmdir()
+
+        except Exception:
+            self.logger.exception("Error processing survey station")
+            raise
 
     def _collect_image_files(
         self,
@@ -525,13 +539,6 @@ class ImageDigitizationPipeline(BasePipeline):
             f"Time: ({geo_time_info['start_time']}, {geo_time_info['end_time']})",
         )
 
-    def _cleanup_empty_folders(self, processed_folders: set[Path]) -> None:
-        """Remove empty folders after processing."""
-        for folder in processed_folders:
-            if not any(folder.iterdir()):
-                folder.rmdir()
-                self.logger.debug(f"Deleted empty folder: {folder}")
-
     @staticmethod
     def _generate_summaries(
         data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]],
@@ -774,7 +781,6 @@ class ImageDigitizationPipeline(BasePipeline):
             with Image.open(src_path) as original_img:
                 # Create rotated image if needed, otherwise use original
                 processed_img = original_img.rotate(180) if rotation_flag == 1 else original_img
-
                 exif_dict = piexif.load(processed_img.info.get("exif", b""))
                 exif_bytes = piexif.dump(exif_dict)
                 processed_img.save(dest_path, quality=100, exif=exif_bytes)

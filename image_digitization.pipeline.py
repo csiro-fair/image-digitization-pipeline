@@ -34,7 +34,6 @@ from PIL import Image
 from marimba.core.pipeline import BasePipeline
 from marimba.core.schemas.base import BaseMetadata
 from marimba.core.schemas.ifdo import iFDOMetadata
-from marimba.core.wrappers.dataset import DatasetWrapper
 from marimba.lib import image
 from marimba.lib.concurrency import multithreaded_generate_image_thumbnails
 from marimba.main import __version__
@@ -524,7 +523,12 @@ class ImageDigitizationPipeline(BasePipeline):
             output_directory=output_info["thumbnails_dir"],
         )
 
-        thumbnail_overview_path = output_info["base_dir"] / "overview.jpg"
+        thumbnail_overview_path = (
+            output_info["base_dir"] /
+            f"{output_info['platform_id']}_"
+            f"{output_info['survey_id']}_"
+            f"{output_info['deployment_number']}_OVERVIEW.JPG"
+        )
         image.create_grid_image(thumbnail_list, thumbnail_overview_path)
         self.logger.debug(f"Generated thumbnail overview image at {thumbnail_overview_path}")
 
@@ -538,76 +542,6 @@ class ImageDigitizationPipeline(BasePipeline):
             f"End: ({geo_time_info['end_lat']}, {geo_time_info['end_long']}), "
             f"Time: ({geo_time_info['start_time']}, {geo_time_info['end_time']})",
         )
-
-    @staticmethod
-    def _generate_summaries(
-        data_mapping: dict[Path, tuple[Path, list[ImageData] | None, dict[str, Any] | None]],
-        data_dir: Path,
-    ) -> None:
-
-        # Generate data summaries at the voyage and platform levels, and an iFDO at the deployment level
-        summary_directories: set[str] = set()
-        ifdo_directories: set[str] = set()
-
-        # Constants for directory depth levels
-        summary_dir_depth = 0
-        summary_subdir_depth = 1
-        ifdo_dir_depth = 2
-
-        # Collect output directories
-        for relative_dst, image_data_list, _ in data_mapping.values():
-            if image_data_list:
-                parts = relative_dst.parts
-                if len(parts) > summary_dir_depth:
-                    summary_directories.add(parts[0])
-                if len(parts) > summary_subdir_depth:
-                    summary_directories.add(str(Path(parts[0]) / parts[1]))
-                if len(parts) > ifdo_dir_depth:
-                    ifdo_directories.add(str(Path(parts[0]) / parts[1] / parts[2]))
-
-        # Convert the sets to sorted lists
-        summary_dirs: list[str] = sorted(summary_directories)
-        ifdo_dirs: list[str] = sorted(ifdo_directories)
-
-        # Subset the data_mapping to include only files in the summary directories
-        for directory in summary_dirs:
-            subset_data_mapping = {
-                src.as_posix(): image_data_list
-                for src, (relative_dst, image_data_list, _) in data_mapping.items()
-                if str(relative_dst).startswith(directory) and image_data_list
-            }
-
-            # Create a dataset summary for each of these
-            dataset_wrapper = DatasetWrapper(data_dir / directory, version=None, dry_run=True)
-            dataset_wrapper.dry_run = False
-            dataset_wrapper.summary_name = f"{Path(directory).name}.summary.md"
-            dataset_wrapper.generate_dataset_summary(subset_data_mapping, progress=False)
-
-            # Add the summary to the dataset mapping
-            output_file_path = dataset_wrapper.summary_path.relative_to(data_dir)
-            data_mapping[dataset_wrapper.summary_path] = output_file_path, None, None
-
-        # Subset the data_mapping to include only files in the ifdo directories
-        for directory in ifdo_dirs:
-            subset_data_mapping = {
-                relative_dst.relative_to(directory).as_posix(): image_data_list
-                for src, (relative_dst, image_data_list, _) in data_mapping.items()
-                if str(relative_dst).startswith(directory) and image_data_list
-            }
-
-            # Create a iFDO for this directory
-            metadata_name = f"{Path(directory).name}.ifdo.yml"
-            iFDOMetadata.create_dataset_metadata(
-                dataset_name=directory,
-                root_dir=data_dir / directory,
-                items=subset_data_mapping,
-                metadata_name=metadata_name,
-            )
-
-            # Add the iFDO to the dataset mapping
-            metadata_path = data_dir / directory / metadata_name
-            output_file_path = metadata_path.relative_to(data_dir)
-            data_mapping[metadata_path] = output_file_path, None, None
 
     def _package(
         self,
@@ -749,9 +683,6 @@ class ImageDigitizationPipeline(BasePipeline):
 
                     metadata = self._metadata_class(image_data)
                     data_mapping[file_path] = output_file_path, [metadata], row.to_dict()
-
-        # Generate summaries and iFDOs
-        self._generate_summaries(data_mapping, data_dir)
 
         return data_mapping
 

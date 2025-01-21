@@ -584,7 +584,7 @@ class ImageDigitizationPipeline(BasePipeline):
                     image_creators = [
                         ImageCreator(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}"),
                         ImageCreator(name="Candice Untiedt", uri="https://orcid.org/0000-0003-1562-3473"),
-                        ImageCreator(name="Chris Jackett", uri="https://orcid.org/0000-0003-1132-1558"),
+                        ImageCreator(name="Christopher Jackett", uri="https://orcid.org/0000-0003-1132-1558"),
                         ImageCreator(name="Franzis Althaus", uri="https://orcid.org/0000-0002-5336-4612"),
                         ImageCreator(name="David Webb", uri="https://orcid.org/0000-0001-5847-7002"),
                         ImageCreator(name="Ben Scoulding", uri="https://orcid.org/0000-0002-9358-736X"),

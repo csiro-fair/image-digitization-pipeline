@@ -583,10 +583,12 @@ class ImageDigitizationPipeline(BasePipeline):
                     image_pi = ImagePI(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}")
                     image_creators = [
                         ImageCreator(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}"),
+                        ImageCreator(name="Candice Untiedt", uri="https://orcid.org/0000-0003-1562-3473"),
                         ImageCreator(name="Chris Jackett", uri="https://orcid.org/0000-0003-1132-1558"),
                         ImageCreator(name="Franzis Althaus", uri="https://orcid.org/0000-0002-5336-4612"),
-                        ImageCreator(name="Candice Untiedt", uri="https://orcid.org/0000-0003-1562-3473"),
                         ImageCreator(name="David Webb", uri="https://orcid.org/0000-0001-5847-7002"),
+                        ImageCreator(name="Ben Scoulding", uri="https://orcid.org/0000-0002-9358-736X"),
+                        ImageCreator(name="CSIRO", uri="https://www.csiro.au"),
                     ]
 
                     camera_housing_viewport = ImageCameraHousingViewport(
@@ -602,7 +604,10 @@ class ImageDigitizationPipeline(BasePipeline):
                     image_event = ImageContext(name=f'{row["survey_id"]}_{row["deployment_number"]}')
                     image_platform = ImageContext(name=str(row["platform_name"]).strip())
                     image_sensor = ImageContext(name="Slidefilm Camera")
-                    image_license = ImageLicense(name="CC BY-NC 4.0", uri="https://creativecommons.org/licenses/by-nc/4.0/")
+                    image_license = ImageLicense(
+                        name="CC BY-NC 4.0",
+                        uri="https://creativecommons.org/licenses/by-nc/4.0"
+                    )
 
                     # ruff: noqa: ERA001
                     image_data = ImageData(

@@ -114,8 +114,6 @@ class ImageDigitizationPipeline(BasePipeline):
         config: dict[str, Any],
         **kwargs: dict[str, Any],
     ) -> None:
-        self.logger.info(f"Importing data from {source_path} to {data_dir}")
-
         import_path = config.get("import_path")
         if import_path is None:
             self.logger.exception("Config missing 'import_path'")
@@ -549,6 +547,8 @@ class ImageDigitizationPipeline(BasePipeline):
         config: dict[str, Any],  # noqa: ARG002
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> dict[Path, tuple[Path, list[BaseMetadata] | None, dict[str, Any] | None]]:
+
+        # Initialise an empty dictionary to store file mappings
         data_mapping: dict[Path, tuple[Path, list[BaseMetadata] | None, dict[str, Any] | None]] = {}
 
         # List all files in the root directory recursively
@@ -585,7 +585,7 @@ class ImageDigitizationPipeline(BasePipeline):
                         ImageCreator(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}"),
                         ImageCreator(name="Candice Untiedt", uri="https://orcid.org/0000-0003-1562-3473"),
                         ImageCreator(name="Christopher Jackett", uri="https://orcid.org/0000-0003-1132-1558"),
-                        ImageCreator(name="Franzis Althaus", uri="https://orcid.org/0000-0002-5336-4612"),
+                        ImageCreator(name="Franziska Althaus", uri="https://orcid.org/0000-0002-5336-4612"),
                         ImageCreator(name="David Webb", uri="https://orcid.org/0000-0001-5847-7002"),
                         ImageCreator(name="Ben Scoulding", uri="https://orcid.org/0000-0002-9358-736X"),
                         ImageCreator(name="CSIRO", uri="https://www.csiro.au"),
@@ -601,7 +601,7 @@ class ImageDigitizationPipeline(BasePipeline):
                     # Create ImageContext and ImageLicense objects
                     image_context = ImageContext(name=str(row["image_context_name"]), uri=str(row["image_context_uri"]))
                     image_project = ImageContext(name=row["survey_id"])
-                    image_event = ImageContext(name=f'{row["survey_id"]}_{row["deployment_number"]}')
+                    image_event = ImageContext(name=output_file_path.stem)
                     image_platform = ImageContext(name=str(row["platform_name"]).strip())
                     image_sensor = ImageContext(name="Slidefilm Camera")
                     image_license = ImageLicense(
@@ -616,7 +616,7 @@ class ImageDigitizationPipeline(BasePipeline):
                         .replace(tzinfo=timezone.utc),
                         image_latitude=float(row["latitude"]) if pd.notna(row["latitude"]) else None,
                         image_longitude=float(row["longitude"]) if pd.notna(row["longitude"]) else None,
-                        # Note: Leave image_altitude (singular number) empty
+                        # Note: Leave image_altitude_meters empty
                         image_altitude_meters=None,
                         image_coordinate_reference_system="EPSG:4326",
                         image_coordinate_uncertainty_meters=None,

@@ -606,7 +606,7 @@ class ImageDigitizationPipeline(BasePipeline):
                     image_sensor = ImageContext(name="Slidefilm Camera")
                     image_license = ImageLicense(
                         name="CC BY-NC 4.0",
-                        uri="https://creativecommons.org/licenses/by-nc/4.0"
+                        uri="https://creativecommons.org/licenses/by-nc/4.0",
                     )
 
                     # ruff: noqa: ERA001

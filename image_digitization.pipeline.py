@@ -577,7 +577,7 @@ class ImageDigitizationPipeline(BasePipeline):
                     file_path.is_file()
                     and file_path.suffix.lower() in [".jpg"]
                     and "_THUMB" not in file_path.name
-                    and "overview" not in file_path.name
+                    and "_OVERVIEW" not in file_path.name
                 ):
                     # Set the image PI and creators
                     image_pi = ImagePI(name=row["survey_pi"], uri=f"https://orcid.org/{row['orcid']}")

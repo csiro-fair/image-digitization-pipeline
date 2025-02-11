@@ -64,7 +64,7 @@ marimba import batch1a /path/to/source/batch1a/* --operation link \
 }'
 ```
 
-For large digitization projects, multiple batches can be processed:
+For large digitization projects, multiple batches can be imported:
 ```bash
 # Import multiple batches
 marimba import batch1a /path/to/batch1a/* --config '...'
@@ -101,7 +101,7 @@ During processing, the Image Digitization Pipeline:
 ### Packaging
 
 ```bash
-marimba package my-digitized-dataset \
+marimba package SEFHES \
 --operation link \
 --version 1.0 \
 --contact-name "Keiko Abe" \

@@ -52,7 +52,7 @@ Each Collection requires:
 
 ## Usage
 
-### Importing Data
+### Importing
 
 Import collections with batch-specific configurations:
 ```bash
